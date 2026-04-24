@@ -1,63 +1,113 @@
-// AppShell.qml — 应用外壳：渐变背景 + 侧边栏 + 内容区
+// AppShell.qml — 应用外壳：支持真毛玻璃模糊的背景层
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
-import QtQuick.Shapes 1.15
+import QtGraphicalEffects 1.15
 
 Rectangle {
     id: appShell
 
-    // 全屏渐变背景（毛玻璃底色）
-    gradient: Gradient {
-        orientation: Gradient.Horizontal
-        GradientStop { position: 0.0; color: Theme.bgBase }
-        GradientStop { position: 0.5; color: "#0d1a1f" }
-        GradientStop { position: 1.0; color: Theme.bgBase }
-    }
-
-    // 背景装饰纹理（半透明几何线条）
-    Canvas {
-        id: bgCanvas
+    // ── 1. 渐变背景层（最先渲染，供给模糊层抓取）──────────
+    Rectangle {
+        id: backgroundLayer
         anchors.fill: parent
-        opacity: 0.04
-        onPaint: {
-            const ctx = getContext("2d");
-            ctx.strokeStyle = Theme.accentPrimary;
-            ctx.lineWidth = 1;
-            for (let i = 0; i < width; i += 80) {
-                ctx.beginPath();
-                ctx.moveTo(i, 0);
-                ctx.lineTo(i, height);
-                ctx.stroke();
+        z: 0
+
+        // 深色渐变
+        gradient: Gradient {
+            orientation: Gradient.Horizontal
+            GradientStop { position: 0.0; color: Theme.bgBase }
+            GradientStop { position: 0.4; color: "#0d1a1f" }
+            GradientStop { position: 1.0; color: Theme.bgBase }
+        }
+
+        // 装饰性网格线
+        Canvas {
+            id: gridCanvas
+            anchors.fill: parent
+            opacity: 0.04
+            onPaint: {
+                const ctx = getContext("2d");
+                ctx.strokeStyle = Theme.accentPrimary;
+                ctx.lineWidth = 1;
+                for (let x = 0; x < width; x += 80) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, 0);
+                    ctx.lineTo(x, height);
+                    ctx.stroke();
+                }
+                for (let y = 0; y < height; y += 80) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(width, y);
+                    ctx.stroke();
+                }
             }
-            for (let j = 0; j < height; j += 80) {
-                ctx.beginPath();
-                ctx.moveTo(0, j);
-                ctx.lineTo(width, j);
-                ctx.stroke();
+        }
+
+        // 右上角装饰圆（模拟光线折射）
+        Rectangle {
+            id: glowOrb
+            width: 600
+            height: 600
+            radius: width / 2
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.topMargin: -200
+            anchors.rightMargin: -100
+            gradient: Gradient {
+                orientation: Gradient.Radial
+                GradientStop { position: 0.0; color: "#2000D4AA" }
+                GradientStop { position: 1.0; color: "transparent" }
             }
+            opacity: 0.5
+        }
+
+        // 左下角装饰圆
+        Rectangle {
+            width: 400
+            height: 400
+            radius: width / 2
+            anchors.bottom: parent.bottom
+            anchors.left: parent.left
+            anchors.bottomMargin: -100
+            anchors.leftMargin: -50
+            gradient: Gradient {
+                orientation: Gradient.Radial
+                GradientStop { position: 0.0; color: "#1500D4AA" }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.4
         }
     }
 
-    // 主布局：侧边栏 + 内容
+    // ── 2. 主布局层（开启 layer，供毛玻璃模糊抓取背景）────
     RowLayout {
+        id: mainLayout
         anchors.fill: parent
         anchors.margins: 0
         spacing: 0
+        z: 1
 
-        // ── 侧边栏 ───────────────────────────────────
+        // 重要：开启 layer 后 ShaderEffectSource 才能抓取这个区域
+        layer.enabled: true
+        layer.samplerName: "contentTexture"
+
+        // 侧边栏
         GlassSidebar {
             id: sidebar
             Layout.fillHeight: true
             Layout.preferredWidth: appState.sidebarExpanded ? 240 : 68
-            Layout.collapseWidth: 68
 
             onNavigateRequested: (page) => {
                 appState.currentPage = page
             }
+            onCollapseToggled: {
+                appState.sidebarExpanded = !appState.sidebarExpanded
+            }
         }
 
-        // ── 内容区 ────────────────────────────────────
+        // 内容区
         ColumnLayout {
             Layout.fillHeight: true
             Layout.fillWidth: true
@@ -78,27 +128,23 @@ Rectangle {
                 }
             }
 
-            // 主内容（页面堆栈）
-            Rectangle {
+            // 主内容面板（真毛玻璃）
+            GlassPanel {
+                id: contentPanel
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.margins: 16
-                color: "transparent"
+                radius: Theme.radiusMd
+                blurRadius: 20
 
-                // 毛玻璃内容面板
-                GlassPanel {
+                StackLayout {
+                    id: pageStack
                     anchors.fill: parent
-                    radius: Theme.radiusMd
+                    anchors.margins: 0
+                    currentIndex: appState.pageIndex
 
-                    // 页面内容
-                    StackLayout {
-                        anchors.fill: parent
-                        anchors.margins: 0
-                        currentIndex: appState.pageIndex
-
-                        HomePage        { id: homePage }
-                        CriminalListPage{ id: criminalPage }
-                    }
+                    HomePage        { id: homePage }
+                    CriminalListPage{ id: criminalPage }
                 }
             }
 
@@ -110,20 +156,14 @@ Rectangle {
         }
     }
 
-    // ── 全局应用状态（单例）──────────────────────────────
+    // ── 3. 全局应用状态 ────────────────────────────────
     QtObject {
         id: appState
 
-        // 侧边栏展开/收起
         property bool sidebarExpanded: true
-
-        // 当前页面名称
         property string currentPage: "home"
-
-        // 当前主题：glassmorphism / dark / light
         property string currentTheme: "glassmorphism"
 
-        // 页面索引映射
         readonly property var pageMap: {
             "home": 0,
             "criminals": 1,

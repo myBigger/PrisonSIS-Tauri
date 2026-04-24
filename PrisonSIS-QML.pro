@@ -1,4 +1,4 @@
-QT += quick qml
+QT += quick qml graphicaleffects
 
 CONFIG += c++17
 

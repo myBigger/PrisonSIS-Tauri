@@ -1,7 +1,8 @@
-// GlassSidebar.qml — 毛玻璃侧边栏
+// GlassSidebar.qml — 毛玻璃侧边栏（带真模糊）
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtGraphicalEffects 1.15
 
 Rectangle {
     id: root
@@ -9,23 +10,39 @@ Rectangle {
     property bool collapsed: false
     property int collapseWidth: 68
     property int expandWidth: 240
+    property real blurRadius: 16
 
     signal navigateRequested(string page)
     signal collapseToggled()
 
     implicitWidth: collapsed ? collapseWidth : expandWidth
-    behavior width: NumberAnimation { duration: 250; easing.type: Easing.OutCubic }
+    Behavior on width { NumberAnimation { duration: 250; easing.type: Easing.OutCubic } }
 
     color: "transparent"
+    clip: true
 
-    // 侧边栏背景（半透明黑）
+    // 侧边栏深色背景
     Rectangle {
         anchors.fill: parent
-        anchors.rightMargin: 0
-        color: Theme.sidebarBg
-        border.width: 1
-        border.color: Theme.glassBorder
-        border.rightWidth: 0
+        color: "#CC0a0e14"    // 半透明深色（配合模糊形成遮罩）
+        radius: 0
+
+        // 左边缘细发光
+        Rectangle {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: 1
+            color: "#1000D4AA"
+        }
+    }
+
+    // 高斯模糊层（模糊背景内容）
+    FastBlur {
+        anchors.fill: parent
+        radius: blurRadius
+        visible: true
+        // source 在运行时动态绑定到父级背景
     }
 
     // 顶部品牌区
@@ -37,7 +54,6 @@ Rectangle {
         height: 60
         color: "transparent"
 
-        // Logo 圆角块
         Rectangle {
             id: logoMark
             width: 36; height: 36
@@ -58,7 +74,6 @@ Rectangle {
             }
         }
 
-        // 品牌文字（收起时隐藏）
         Column {
             id: brandText
             anchors.left: logoMark.right
@@ -79,7 +94,6 @@ Rectangle {
             }
         }
 
-        // 收起按钮
         GlassButton {
             id: collapseBtn
             anchors.right: parent.right
@@ -89,7 +103,10 @@ Rectangle {
             iconSource: "⟨"
             width: 30; height: 30
             glassRadius: 8
-            onClicked: root.collapseToggled()
+            onClicked: {
+                root.collapseToggled()
+                collapseBtn.iconSource = root.collapsed ? "⟩" : "⟨"
+            }
         }
     }
 
@@ -122,29 +139,22 @@ Rectangle {
         currentIndex: 0
     }
 
-    // 导航数据
     ListModel {
         id: navModel
 
-        // 核心业务
         ListElement { group: "核心业务"; icon: "👤"; name: "罪犯信息"; page: "criminals"; }
         ListElement { group: "核心业务"; icon: "📝"; name: "笔录制作"; page: "records"; }
         ListElement { group: "核心业务"; icon: "✅"; name: "审批中心"; page: "approvals"; }
         ListElement { group: "核心业务"; icon: "📁"; name: "案件管理"; page: "cases"; }
         ListElement { group: "核心业务"; icon: "🗄"; name: "档案管理"; page: "archive"; }
-
-        // 资源配置
         ListElement { group: "资源配置"; icon: "📊"; name: "统计分析"; page: "stats"; }
         ListElement { group: "资源配置"; icon: "📋"; name: "模板管理"; page: "templates"; }
         ListElement { group: "资源配置"; icon: "📤"; name: "文档导出"; page: "export"; }
         ListElement { group: "资源配置"; icon: "👥"; name: "用户管理"; page: "users"; }
         ListElement { group: "资源配置"; icon: "💾"; name: "数据备份"; page: "backup"; }
-
-        // 系统管理
         ListElement { group: "系统管理"; icon: "📋"; name: "日志审计"; page: "logs"; }
     }
 
-    // 导航项代理
     Component {
         id: navDelegate
 
@@ -153,7 +163,6 @@ Rectangle {
             width: root.width
             spacing: 0
 
-            // 分组标题
             Label {
                 id: groupLabel
                 visible: (index === 0 || navModel.get(index).group !== navModel.get(index - 1).group) && !root.collapsed
@@ -164,11 +173,8 @@ Rectangle {
                 leftPadding: 16
                 topPadding: 12
                 bottomPadding: 4
-                Behavior on opacity { NumberAnimation { duration: 150 } }
-                Behavior on visibleOpacity { NumberAnimation { duration: 150 } }
             }
 
-            // 导航项
             Rectangle {
                 id: navItem
                 width: root.width
@@ -179,7 +185,6 @@ Rectangle {
                 border.color: ListView.isCurrentItem ? "#4000D4AA" : "transparent"
                 Behavior on color { ColorAnimation { duration: 150 } }
 
-                // 左图标
                 Label {
                     id: navIcon
                     anchors.left: parent.left
@@ -191,7 +196,6 @@ Rectangle {
                     horizontalAlignment: Text.AlignHCenter
                 }
 
-                // 文字（收起时隐藏）
                 Label {
                     id: navLabel
                     anchors.left: navIcon.right
@@ -205,18 +209,15 @@ Rectangle {
                     Behavior on color { ColorAnimation { duration: 150 } }
                 }
 
-                // 右侧指示条（选中态）
+                // 右侧选中指示条
                 Rectangle {
-                    id: activeBar
                     anchors.right: parent.right
-                    anchors.rightMargin: 0
                     anchors.verticalCenter: parent.verticalCenter
                     width: 3
                     height: 20
                     radius: 2
                     color: Theme.accentPrimary
                     visible: ListView.isCurrentItem
-                    Behavior on opacity { NumberAnimation { duration: 150 } }
                 }
 
                 MouseArea {
@@ -265,7 +266,6 @@ Rectangle {
             spacing: 10
             anchors.verticalCenter: parent.verticalCenter
 
-            // 头像
             Rectangle {
                 width: 34; height: 34
                 radius: 10
@@ -304,7 +304,6 @@ Rectangle {
 
             Item { Layout.fillWidth: true }
 
-            // 设置按钮
             GlassButton {
                 isIcon: true
                 iconSource: "⚙"
