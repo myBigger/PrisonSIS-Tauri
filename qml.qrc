@@ -1,0 +1,17 @@
+<!DOCTYPE RCC>
+<RCC>
+    <qresource prefix="/">
+        <file>qml/Main.qml</file>
+        <file>qml/AppShell.qml</file>
+        <file>qml/Theme.qml</file>
+        <file>qml/components/GlassPanel.qml</file>
+        <file>qml/components/GlassButton.qml</file>
+        <file>qml/components/GlassInput.qml</file>
+        <file>qml/components/GlassSidebar.qml</file>
+        <file>qml/components/GlassHeader.qml</file>
+        <file>qml/components/GlassCard.qml</file>
+        <file>qml/pages/HomePage.qml</file>
+        <file>qml/pages/CriminalListPage.qml</file>
+        <file>qtquickcontrols2.conf</file>
+    </qresource>
+</RCC>
