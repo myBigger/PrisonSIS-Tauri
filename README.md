@@ -1,76 +1,98 @@
-# PrisonSIS-QML
+# PrisonSIS-Tauri
 
-> 监狱审讯笔录系统 — QML 重构版本（毛玻璃暗黑风格）
-
-基于 Qt Quick/QML 重构的 PrisonSIS 前端，采用 **Glassmorphism + Dark Mode** 设计风格。
+> 监狱审讯笔录系统 — Tauri 2.0 + React 重构版本
+> 采用 **Glassmorphism + Dark Mode** 设计风格
 
 ## 技术栈
 
-| 技术 | 说明 |
-|------|------|
-| Qt 6 | 基础框架 |
-| Qt Quick / QML | UI 实现 |
-| Qt Quick Controls 2 | 控件库 |
-| Qt Graphical Effects | 模糊/毛玻璃效果 |
-| Material Style | 基础控件风格 |
+| 层 | 技术 |
+|---|---|
+| 桌面框架 | Tauri 2.0 |
+| 前端框架 | React 18 + TypeScript |
+| 构建工具 | Vite 5 |
+| 样式 | 原生 CSS（毛玻璃效果） |
+| 后端 | Rust（Tauri Commands） |
+| 目标包 | `.exe` (Windows x64) |
 
 ## 设计风格
 
-- **毛玻璃效果**：半透明面板 + 高斯模糊背景
+- **毛玻璃效果**：`backdrop-filter: blur(20px)` + CSS 半透明
 - **强调色**：Teal `#00D4AA` + 琥珀金 `#F5A623`
 - **圆角**：统一 14px
-- **字体**：Inter / Segoe UI / Noto Sans CJK
+- **字体**：Inter / Segoe UI / Noto Sans CJK SC
 
 ## 项目结构
 
 ```
-PrisonSIS-QML/
-├── PrisonSIS-QML.pro       # Qt 项目文件
-├── main.cpp               # 应用入口
-├── qml.qrc               # QML 资源注册
-├── qtquickcontrols2.conf # Quick Controls 配置
-│
-├── qml/
-│   ├── Main.qml          # 入口窗口
-│   ├── AppShell.qml      # 应用外壳
-│   ├── Theme.qml         # 全局主题变量（Singleton）
+PrisonSIS-Tauri/
+├── frontend/
+│   ├── src/
+│   │   ├── App.tsx              # 应用主入口
+│   │   ├── index.css            # 全局样式 + 毛玻璃 CSS
+│   │   ├── theme.ts            # 主题变量
+│   │   ├── components/
+│   │   │   ├── GlassSidebar.tsx     # 侧边栏
+│   │   │   ├── GlassHeader.tsx      # 顶部栏
+│   │   │   └── GlassStatusBar.tsx   # 底部状态栏
+│   │   └── pages/
+│   │       ├── HomePage.tsx        # 首页仪表盘
+│   │       └── CriminalListPage.tsx # 罪犯列表
 │   │
-│   ├── components/       # 可复用组件
-│   │   ├── GlassPanel.qml    # 毛玻璃面板
-│   │   ├── GlassButton.qml   # 毛玻璃按钮
-│   │   ├── GlassInput.qml    # 毛玻璃输入框
-│   │   ├── GlassCard.qml     # 数据展示卡片
-│   │   ├── GlassSidebar.qml  # 侧边导航栏
-│   │   ├── GlassHeader.qml   # 顶部状态栏
-│   │   └── GlassStatusBar.qml # 底部状态栏
+│   ├── src-tauri/               # Rust 后端
+│   │   ├── src/lib.rs           # Tauri Commands + Rust 逻辑
+│   │   ├── Cargo.toml
+│   │   └── tauri.conf.json
 │   │
-│   └── pages/            # 页面
-│       ├── HomePage.qml       # 首页仪表盘
-│       └── CriminalListPage.qml # 罪犯信息列表
+│   ├── package.json
+│   └── vite.config.ts
 │
-└── README.md
+├── README.md
 ```
 
 ## 构建方法
 
+### 前置依赖
+
 ```bash
-# Qt Creator 打开 .pro 文件直接编译
-# 或命令行：
+# Node.js 18+
+node --version  # >= 18
 
-qmake PrisonSIS-QML.pro
-make
-
-# Qt 6 + CMake（推荐）
-mkdir build && cd build
-cmake ..
-make
+# Rust 1.77+
+rustc --version  # >= 1.77
 ```
 
-## 依赖
+### 开发模式
 
-- Qt 6.2+
-- Qt Quick Controls 2
-- Qt Graphical Effects（用于后续毛玻璃效果增强）
+```bash
+cd frontend
+npm install
+npm run tauri dev
+```
+
+### 生产构建
+
+```bash
+npm run tauri build
+```
+
+构建产物位于 `frontend/src-tauri/target/release/bundle/nsis/`（Windows NSIS 安装包）。
+
+## Tauri 命令（Rust → 前端）
+
+| 命令 | 说明 | 返回 |
+|------|------|------|
+| `get_criminals` | 获取罪犯列表 | `Criminal[]` |
+| `get_recent_records` | 获取近期笔录 | `Record[]` |
+| `get_dashboard_stats` | 获取统计面板 | `DashboardStats` |
+
+## 页面路由
+
+| 页面 | 路径 | 说明 |
+|------|------|------|
+| 首页仪表盘 | `/home` | 统计卡片 + 近期笔录 |
+| 罪犯信息 | `/criminals` | 人员列表 + 搜索 |
+| 笔录制作 | `/records` | 待开发 |
+| 审批中心 | `/approvals` | 待开发 |
 
 ## 相关项目
 

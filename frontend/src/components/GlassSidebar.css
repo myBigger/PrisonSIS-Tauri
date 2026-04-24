@@ -1,0 +1,5 @@
+/* GlassSidebar.css — 复用全局样式，侧边栏特定样式 */
+.sidebar.collapsed .nav-item {
+  padding: 0;
+  justify-content: center;
+}
