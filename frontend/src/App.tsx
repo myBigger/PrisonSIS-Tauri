@@ -10,7 +10,6 @@ import CriminalListPage from './pages/CriminalListPage'
 const pages: Record<string, React.FC> = {
   home: HomePage,
   criminals: CriminalListPage,
-  // 其他页面后续补充
 }
 
 export default function App() {
@@ -44,10 +43,7 @@ export default function App() {
           />
 
           {/* 主内容面板（毛玻璃效果） */}
-          <div
-            className="glass-panel"
-            style={{ marginTop: 0 }}
-          >
+          <div className="glass-panel" style={{ marginTop: 0 }}>
             <PageComponent key={currentPage} />
           </div>
 
