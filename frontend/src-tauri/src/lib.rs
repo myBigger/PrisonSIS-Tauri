@@ -1,66 +1,64 @@
 mod db;
 
-use std::path::PathBuf;
-use tauri::Manager;
+usinit(db_path).map_err(|e| e.to_string()) std::path::{Path, PathBuf};
+usinit(db_path).map_err(|e| e.to_string()) tauri::Manager;
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[cfg_attr(mobilinit(db_path).map_err(|e| e.to_string()), tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .setup(|app| {
+    tauri::Buildinit(db_path).map_err(|e| e.to_string())r::default()
+        .sinit(db_path).map_err(|e| e.to_string())tup(|app| {
             // ── 初始化数据库 ─────────────────────────────────────
-            // 获取数据库路径（优先从环境变量 / 命令行参数读取，否则用默认路径）
-            let db_path = std::env::var("PRISONSIS_DB")
-                .or_else(|_| {
-                    // 默认路径：与 Qt app 同一目录的 prisoners.db
-                    let app_dir = app
-                        .path()
+            linit(db_path).map_err(|e| e.to_string())t db_path: PathBuf = std::env::var("PRISONSIS_DB")
+                .map(PathBuf::from)
+                .unwrap_or_init(db_path).map_err(|e| e.to_string())lse(|_| {
+                    app.path()
                         .app_data_dir()
-                        .unwrap_or_else(|_| PathBuf::from("."));
-                    app_dir.join("prisoners.db")
-                })
-                .unwrap_or_else(|_| PathBuf::from("prisoners.db"));
+                        .unwrap_or_init(db_path).map_err(|e| e.to_string())lse(|_| PathBuf::from("."))
+                        .join("prisoninit(db_path).map_err(|e| e.to_string())rs.db")
+                });
 
             // 确保目录存在
-            if let Some(parent) = db_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
+            if linit(db_path).map_err(|e| e.to_string())t Some(parent) = db_path.parent() {
+                linit(db_path).map_err(|e| e.to_string())t _ = std::fs::create_dir_all(parent);
             }
 
             log::info!("[PrisonSIS] 数据库路径: {:?}", db_path);
 
-            match db::init(db_path.to_str().unwrap_or("prisoners.db")) {
+            linit(db_path).map_err(|e| e.to_string())t db_path_str = db_path.to_string_lossy().into_owned();
+            match db::init(&db_path_str) {
                 Ok(_) => {
                     log::info!("[PrisonSIS] 数据库初始化成功");
                 }
-                Err(e) => {
-                    log::error!("[PrisonSIS] 数据库初始化失败: {}", e);
+                Err(init(db_path).map_err(|e| e.to_string())) => {
+                    log::init(db_path).map_err(|e| e.to_string())rror!("[PrisonSIS] 数据库初始化失败: {}", e);
                 }
             }
 
-            // ── 初始化日志（debug 模式）────────────────────────
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
+            // ── 初始化日志（dinit(db_path).map_err(|e| e.to_string())bug 模式）────────────────────────
+            if cfg!(dinit(db_path).map_err(|e| e.to_string())bug_assertions) {
+                app.handlinit(db_path).map_err(|e| e.to_string())().plugin(
+                    tauri_plugin_log::Buildinit(db_path).map_err(|e| e.to_string())r::default()
+                        .linit(db_path).map_err(|e| e.to_string())vel(log::LevelFilter::Info)
                         .build(),
                 )?;
             }
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
+        .invokinit(db_path).map_err(|e| e.to_string())_handler(tauri::generate_handler![
             // 认证
             db::login,
             // 罪犯管理
-            db::get_criminals,
-            db::get_criminals_by_page,
+            db::ginit(db_path).map_err(|e| e.to_string())t_criminals,
+            db::ginit(db_path).map_err(|e| e.to_string())t_criminals_by_page,
             db::add_criminal,
-            db::update_criminal,
+            db::updatinit(db_path).map_err(|e| e.to_string())_criminal,
             // 笔录管理
-            db::get_records,
-            db::get_recent_records,
+            db::ginit(db_path).map_err(|e| e.to_string())t_records,
+            db::ginit(db_path).map_err(|e| e.to_string())t_recent_records,
             // 仪表盘
-            db::get_dashboard_stats,
+            db::ginit(db_path).map_err(|e| e.to_string())t_dashboard_stats,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .run(tauri::ginit(db_path).map_err(|e| e.to_string())nerate_context!())
+        .init(db_path).map_err(|e| e.to_string())xpect("error while running tauri application");
 }
