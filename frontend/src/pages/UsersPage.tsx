@@ -1,5 +1,5 @@
 // UsersPage.tsx — 用户管理页面
-import React, { useState } from 'react'
+import { useState } from 'react'
 
 const mockUsers = [
   { id: 1, userId: 'US-0001', username: 'admin', realName: '系统管理员', role: 'Admin', department: '信息科', position: '科长', lastLogin: '2026-04-24 09:00', enabled: true },

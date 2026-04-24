@@ -1,5 +1,5 @@
 // GlassStatusBar.tsx — 毛玻璃底部状态栏
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 
 export default function GlassStatusBar() {
   const [time, setTime] = useState(new Date().toLocaleString('zh-CN', {

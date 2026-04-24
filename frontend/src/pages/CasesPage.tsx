@@ -1,5 +1,5 @@
 // CasesPage.tsx — 案件管理页面
-import React, { useState } from 'react'
+import { useState } from 'react'
 
 const mockCases = [
   { id: 1, caseNumber: '2026-JA-0042', name: '张某盗窃案', type: '盗窃罪', status: '调查中', handler: '王警官', date: '2026-04-10' },

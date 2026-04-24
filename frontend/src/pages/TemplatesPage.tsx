@@ -1,5 +1,5 @@
 // TemplatesPage.tsx — 模板管理页面
-import React, { useState } from 'react'
+import { useState } from 'react'
 
 const templates = [
   { id: 'TM-01', name: '入监笔录标准模板', type: 'RT-01', status: '启用', version: 'v1.0', updated: '2026-01-15' },
@@ -8,7 +8,6 @@ const templates = [
   { id: 'TM-04', name: '释放笔录模板', type: 'RT-04', status: '草稿', version: 'v0.9', updated: '2026-03-05' },
 ]
 
-const statusColor = (s: string) => s === '启用' ? 'var(--status-online)' : 'var(--accent-secondary)'
 
 export default function TemplatesPage() {
   const [tpls] = useState(templates)

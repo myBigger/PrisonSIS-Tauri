@@ -1,5 +1,5 @@
 // GlassSidebar.tsx — 毛玻璃侧边栏
-import React, { useState } from 'react'
+import { useState } from 'react'
 import './GlassSidebar.css'
 
 interface NavItem {

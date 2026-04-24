@@ -1,5 +1,5 @@
 // LogsPage.tsx — 日志审计页面
-import React, { useState } from 'react'
+import { useState } from 'react'
 
 const mockLogs = [
   { id: 1, user: 'admin', action: '登录', module: '认证', details: '登录成功', ip: '127.0.0.1', time: '2026-04-24 09:00:12' },

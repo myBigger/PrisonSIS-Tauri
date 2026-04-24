@@ -1,6 +1,13 @@
-// CriminalListPage.tsx — 罪犯信息列表页（对接 Tauri Rust 后端）
-import React, { useEffect, useState, useCallback } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+// CriminalListPage.tsx — 罪犯信息列表页（网页预览版：使用模拟数据）
+import { useEffect, useState, useCallback } from 'react'
+
+const mockCriminals = [
+  { id: 1, criminal_id: 'CR-00001', name: '张某', gender: '男', ethnicity: '汉族', birth_date: '1990-05-12', id_card_number: '***********1XXX', native_place: '北京', education: '初中', crime: '盗窃罪', sentence_years: 3, sentence_months: 0, entry_date: '2026-01-15', crime_type: '财产犯罪', manage_level: '普通', district: '一监区', cell: '101', archived: false, case_number: '2026-JA-0001', custody_date: '2026-01-15', custody_location: '北京市第一监狱', bed_number: '101-01', contact_phone: '', },
+  { id: 2, criminal_id: 'CR-00002', name: '李某', gender: '女', ethnicity: '汉族', birth_date: '1988-03-22', id_card_number: '***********2XXX', native_place: '上海', education: '高中', crime: '故意伤害', sentence_years: 5, sentence_months: 6, entry_date: '2026-02-13', crime_type: '人身伤害', manage_level: '重点', district: '二监区', cell: '203', archived: false, case_number: '2026-JA-0002', custody_date: '2026-02-13', custody_location: '北京市第二监狱', bed_number: '203-02', contact_phone: '', },
+  { id: 3, criminal_id: 'CR-00003', name: '王某', gender: '男', ethnicity: '汉族', birth_date: '1995-08-30', id_card_number: '***********3XXX', native_place: '广州', education: '本科', crime: '诈骗罪', sentence_years: 2, sentence_months: 0, entry_date: '2026-02-19', crime_type: '财产犯罪', manage_level: '普通', district: '一监区', cell: '105', archived: true, case_number: '2026-JA-0003', custody_date: '2026-02-19', custody_location: '北京市第一监狱', bed_number: '', contact_phone: '', },
+  { id: 4, criminal_id: 'CR-00004', name: '赵某', gender: '男', ethnicity: '回族', birth_date: '1992-11-08', id_card_number: '***********4XXX', native_place: '西安', education: '初中', crime: '抢劫罪', sentence_years: 7, sentence_months: 0, entry_date: '2026-03-08', crime_type: '暴力犯罪', manage_level: '重点', district: '三监区', cell: '301', archived: false, case_number: '2026-JA-0004', custody_date: '2026-03-08', custody_location: '北京市第三监狱', bed_number: '301-01', contact_phone: '', },
+  { id: 5, criminal_id: 'CR-00005', name: '刘某', gender: '女', ethnicity: '汉族', birth_date: '1997-02-14', id_card_number: '***********5XXX', native_place: '成都', education: '大专', crime: '贩毒罪', sentence_years: 10, sentence_months: 0, entry_date: '2026-03-12', crime_type: '毒品犯罪', manage_level: '严管', district: '四监区', cell: '401', archived: false, case_number: '2026-JA-0005', custody_date: '2026-03-12', custody_location: '北京市第四监狱', bed_number: '401-01', contact_phone: '', },
+]
 
 interface Criminal {
   id: number
@@ -20,21 +27,7 @@ interface Criminal {
   manage_level: string
   district: string
   cell: string
-  status: string
   archived: boolean
-  case_number: string
-  custody_date: string
-  custody_location: string
-  bed_number: string
-  contact_phone: string
-}
-
-const statusColor = (s: boolean) => {
-  return s ? 'var(--status-online)' : 'var(--text-muted)'
-}
-
-const statusLabel = (archived: boolean) => {
-  return archived ? '归档' : '在押'
 }
 
 const PAGE_SIZE = 20
@@ -51,21 +44,14 @@ export default function CriminalListPage() {
 
   const loadCriminals = useCallback((p: number, q: string) => {
     setLoading(true)
-    invoke<[Criminal[], number]>('get_criminals_by_page', {
-      page: p,
-      pageSize: PAGE_SIZE,
-      search: q,
-    })
-      .then(([data, count]) => {
-        setCriminals(data)
-        setTotal(count)
-      })
-      .catch(err => {
-        console.error('加载罪犯数据失败:', err)
-        setCriminals([])
-        setTotal(0)
-      })
-      .finally(() => setLoading(false))
+    const filtered = q
+      ? mockCriminals.filter(c =>
+          c.name.includes(q) || c.criminal_id.includes(q) || c.crime.includes(q)
+        )
+      : mockCriminals
+    setCriminals(filtered)
+    setTotal(filtered.length)
+    setLoading(false)
   }, [])
 
   useEffect(() => {
@@ -81,6 +67,9 @@ export default function CriminalListPage() {
     if (newPage < 0 || newPage >= totalPages) return
     setPage(newPage)
   }
+
+  const statusColor = (archived: boolean) =>
+    archived ? 'var(--text-muted)' : 'var(--status-online)'
 
   return (
     <div className="page">
@@ -133,14 +122,14 @@ export default function CriminalListPage() {
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={13} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '32px' }}>
+                  <td colSpan={13} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
                     加载中...
                   </td>
                 </tr>
               )}
               {!loading && criminals.length === 0 && (
                 <tr>
-                  <td colSpan={13} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '32px' }}>
+                  <td colSpan={13} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
                     {search ? '未找到匹配的记录' : '暂无数据'}
                   </td>
                 </tr>
@@ -165,7 +154,7 @@ export default function CriminalListPage() {
                   <td>
                     <span className="cell-status">
                       <span className="status-dot" style={{ background: statusColor(c.archived) }} />
-                      <span style={{ color: statusColor(c.archived) }}>{statusLabel(c.archived)}</span>
+                      <span style={{ color: statusColor(c.archived) }}>{c.archived ? '归档' : '在押'}</span>
                     </span>
                   </td>
                   <td>
@@ -182,26 +171,13 @@ export default function CriminalListPage() {
 
         {/* 分页 */}
         <div style={{
-          padding: '12px 16px',
-          borderTop: '1px solid var(--glass-border)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          fontSize: 12,
-          color: 'var(--text-muted)'
+          padding: '12px 16px', borderTop: '1px solid var(--glass-border)',
+          display: 'flex', alignItems: 'center', gap: 12, fontSize: 12, color: 'var(--text-muted)'
         }}>
           {loading ? '加载中...' : `共 ${total} 条，第 ${page + 1}/${totalPages || 1} 页`}
           <div style={{ flex: 1 }} />
-          <button
-            className="glass-btn small"
-            disabled={page === 0 || loading}
-            onClick={() => handlePageChange(page - 1)}
-          >上一页</button>
-          <button
-            className="glass-btn small"
-            disabled={page >= totalPages - 1 || loading}
-            onClick={() => handlePageChange(page + 1)}
-          >下一页</button>
+          <button className="glass-btn small" disabled={page === 0 || loading} onClick={() => handlePageChange(page - 1)}>上一页</button>
+          <button className="glass-btn small" disabled={page >= totalPages - 1 || loading} onClick={() => handlePageChange(page + 1)}>下一页</button>
         </div>
       </div>
     </div>

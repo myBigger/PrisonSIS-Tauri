@@ -1,5 +1,5 @@
 // BackupPage.tsx — 数据备份页面
-import React, { useState } from 'react'
+import { useState } from 'react'
 
 const backupHistory = [
   { id: 1, name: '完整备份-20260424', type: '完整', size: '128.5 MB', records: 1248, time: '2026-04-24 02:00', status: '成功' },

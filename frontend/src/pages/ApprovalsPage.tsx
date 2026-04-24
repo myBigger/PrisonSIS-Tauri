@@ -1,6 +1,10 @@
 // ApprovalsPage.tsx — 审批中心页面
-import React, { useEffect, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { useEffect, useState } from 'react'
+
+const mockInvoke = async (_cmd: string) => {
+  if (_cmd === 'get_records') return [[], 0]
+  return [[], 0]
+}
 
 interface ApprovalRecord {
   id: number
@@ -28,16 +32,15 @@ const statusLabel = (s: string) => {
   return map[s] || s
 }
 
-export default function ApprovalsPage() {
-  const [records, setRecords] = useState<ApprovalRecord[]>([])
-  const [loading, setLoading] = useState(true)
+const mockRecords: ApprovalRecord[] = [
+  { id: 1, record_id: 'BL-2026-0001', criminal_name: '张某', record_type: '问询', status: 'Approved', approver1_result: '', approver2_result: '', reject_reason: '', created_at: '2026-04-24 09:30' },
+  { id: 2, record_id: 'BL-2026-0002', criminal_name: '李某', record_type: '审讯', status: 'Pending', approver1_result: '', approver2_result: '', reject_reason: '', created_at: '2026-04-23 14:20' },
+  { id: 3, record_id: 'BL-2026-0003', criminal_name: '王某', record_type: '问询', status: 'Approved', approver1_result: '', approver2_result: '', reject_reason: '', created_at: '2026-04-23 10:00' },
+  { id: 4, record_id: 'BL-2026-0004', criminal_name: '赵某', record_type: '问询', status: 'Rejected', approver1_result: '', approver2_result: '', reject_reason: '内容不完整', created_at: '2026-04-22 16:45' },
+]
 
-  useEffect(() => {
-    invoke<[ApprovalRecord[], number]>('get_records', { page: 0, pageSize: 50, search: '' })
-      .then(([data]) => setRecords(data.filter((r: any) => r.status === 'Pending' || r.status === 'Approved' || r.status === 'Rejected')))
-      .catch(() => setRecords([]))
-      .finally(() => setLoading(false))
-  }, [])
+export default function ApprovalsPage() {
+  const [records] = useState<ApprovalRecord[]>(mockRecords)
 
   const pending = records.filter(r => r.status === 'Pending')
   const processed = records.filter(r => r.status !== 'Pending')
@@ -76,7 +79,7 @@ export default function ApprovalsPage() {
           </h2>
         </div>
         <div style={{ flex: 1, overflow: 'auto' }}>
-          {pending.length === 0 && !loading && (
+          {pending.length === 0 && (
             <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 48 }}>暂无待审批项</div>
           )}
           {pending.map(r => (

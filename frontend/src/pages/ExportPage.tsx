@@ -1,5 +1,5 @@
 // ExportPage.tsx — 文档导出页面
-import React, { useState } from 'react'
+import { useState } from 'react'
 
 const formats = [
   { id: 'pdf', label: 'PDF文档', icon: '📄', desc: '适用于打印和存档，格式固定' },
