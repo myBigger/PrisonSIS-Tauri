@@ -6,27 +6,44 @@ import GlassHeader from './components/GlassHeader'
 import GlassStatusBar from './components/GlassStatusBar'
 import HomePage from './pages/HomePage'
 import CriminalListPage from './pages/CriminalListPage'
+import RecordsPage from './pages/RecordsPage'
+import ApprovalsPage from './pages/ApprovalsPage'
+import CasesPage from './pages/CasesPage'
+import ArchivePage from './pages/ArchivePage'
+import StatsPage from './pages/StatsPage'
+import TemplatesPage from './pages/TemplatesPage'
+import ExportPage from './pages/ExportPage'
+import UsersPage from './pages/UsersPage'
+import BackupPage from './pages/BackupPage'
+import LogsPage from './pages/LogsPage'
 
 const pages: Record<string, React.FC> = {
   home: HomePage,
   criminals: CriminalListPage,
+  records: RecordsPage,
+  approvals: ApprovalsPage,
+  cases: CasesPage,
+  archive: ArchivePage,
+  stats: StatsPage,
+  templates: TemplatesPage,
+  export: ExportPage,
+  users: UsersPage,
+  backup: BackupPage,
+  logs: LogsPage,
 }
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState('home')
-  const [theme, setTheme] = useState('glassmorphism')
   const [sidebarVisible, setSidebarVisible] = useState(true)
 
   const PageComponent = pages[currentPage] || HomePage
 
   return (
     <>
-      {/* 渐变背景层 */}
       <div className="app-background">
         <div className="glow-orb-bottom" />
       </div>
 
-      {/* 应用外壳 */}
       <div className="app-shell">
         {sidebarVisible && (
           <GlassSidebar
@@ -39,11 +56,10 @@ export default function App() {
           <GlassHeader
             currentPage={currentPage}
             onToggleSidebar={() => setSidebarVisible(v => !v)}
-            onThemeSwitch={setTheme}
+            onThemeSwitch={() => {}}
           />
 
-          {/* 主内容面板（毛玻璃效果） */}
-          <div className="glass-panel" style={{ marginTop: 0 }}>
+          <div className="glass-panel">
             <PageComponent key={currentPage} />
           </div>
 
