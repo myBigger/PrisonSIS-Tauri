@@ -23,12 +23,20 @@ const navData: NavItem[] = [
   { group: '系统管理', icon: '📋', name: '日志审计', page: 'logs' },
 ]
 
+interface User {
+  username: string
+  real_name: string
+  role: string
+}
+
 interface Props {
   currentPage: string
   onNavigate: (page: string) => void
+  user: User
+  onLogout?: () => void
 }
 
-export default function GlassSidebar({ currentPage, onNavigate }: Props) {
+export default function GlassSidebar({ currentPage, onNavigate, user, onLogout }: Props) {
   const [collapsed, setCollapsed] = useState(false)
 
   const groups = [...new Set(navData.map(n => n.group))]
@@ -78,15 +86,19 @@ export default function GlassSidebar({ currentPage, onNavigate }: Props) {
 
       {/* 底部用户区 */}
       <div className="sidebar-footer">
-        <div className="sidebar-avatar">管</div>
+        <div className="sidebar-avatar">{user.real_name?.charAt(0) || '用'}</div>
         {!collapsed && (
           <div className="sidebar-user-info">
-            <div className="name">管理员</div>
-            <div className="role">系统管理员</div>
+            <div className="name">{user.real_name || user.username}</div>
+            <div className="role">{user.role === 'Admin' ? '系统管理员' : user.role}</div>
           </div>
         )}
-        <button className="glass-btn icon-btn" title="设置">
-          ⚙
+        <button
+          className="glass-btn icon-btn"
+          title="退出登录"
+          onClick={onLogout}
+        >
+          🚪
         </button>
       </div>
     </div>

@@ -1,36 +1,12 @@
-// CriminalListPage.tsx — 罪犯信息列表页（网页预览版：使用模拟数据）
+// CriminalListPage.tsx — 罪犯信息列表页
 import { useEffect, useState, useCallback } from 'react'
-
-const mockCriminals = [
-  { id: 1, criminal_id: 'CR-00001', name: '张某', gender: '男', ethnicity: '汉族', birth_date: '1990-05-12', id_card_number: '***********1XXX', native_place: '北京', education: '初中', crime: '盗窃罪', sentence_years: 3, sentence_months: 0, entry_date: '2026-01-15', crime_type: '财产犯罪', manage_level: '普通', district: '一监区', cell: '101', archived: false, case_number: '2026-JA-0001', custody_date: '2026-01-15', custody_location: '北京市第一监狱', bed_number: '101-01', contact_phone: '', },
-  { id: 2, criminal_id: 'CR-00002', name: '李某', gender: '女', ethnicity: '汉族', birth_date: '1988-03-22', id_card_number: '***********2XXX', native_place: '上海', education: '高中', crime: '故意伤害', sentence_years: 5, sentence_months: 6, entry_date: '2026-02-13', crime_type: '人身伤害', manage_level: '重点', district: '二监区', cell: '203', archived: false, case_number: '2026-JA-0002', custody_date: '2026-02-13', custody_location: '北京市第二监狱', bed_number: '203-02', contact_phone: '', },
-  { id: 3, criminal_id: 'CR-00003', name: '王某', gender: '男', ethnicity: '汉族', birth_date: '1995-08-30', id_card_number: '***********3XXX', native_place: '广州', education: '本科', crime: '诈骗罪', sentence_years: 2, sentence_months: 0, entry_date: '2026-02-19', crime_type: '财产犯罪', manage_level: '普通', district: '一监区', cell: '105', archived: true, case_number: '2026-JA-0003', custody_date: '2026-02-19', custody_location: '北京市第一监狱', bed_number: '', contact_phone: '', },
-  { id: 4, criminal_id: 'CR-00004', name: '赵某', gender: '男', ethnicity: '回族', birth_date: '1992-11-08', id_card_number: '***********4XXX', native_place: '西安', education: '初中', crime: '抢劫罪', sentence_years: 7, sentence_months: 0, entry_date: '2026-03-08', crime_type: '暴力犯罪', manage_level: '重点', district: '三监区', cell: '301', archived: false, case_number: '2026-JA-0004', custody_date: '2026-03-08', custody_location: '北京市第三监狱', bed_number: '301-01', contact_phone: '', },
-  { id: 5, criminal_id: 'CR-00005', name: '刘某', gender: '女', ethnicity: '汉族', birth_date: '1997-02-14', id_card_number: '***********5XXX', native_place: '成都', education: '大专', crime: '贩毒罪', sentence_years: 10, sentence_months: 0, entry_date: '2026-03-12', crime_type: '毒品犯罪', manage_level: '严管', district: '四监区', cell: '401', archived: false, case_number: '2026-JA-0005', custody_date: '2026-03-12', custody_location: '北京市第四监狱', bed_number: '401-01', contact_phone: '', },
-]
-
-interface Criminal {
-  id: number
-  criminal_id: string
-  name: string
-  gender: string
-  ethnicity: string
-  birth_date: string
-  id_card_number: string
-  native_place: string
-  education: string
-  crime: string
-  sentence_years: number
-  sentence_months: number
-  entry_date: string
-  crime_type: string
-  manage_level: string
-  district: string
-  cell: string
-  archived: boolean
-}
+import { getCriminalsByPage } from '../api'
+import type { Criminal } from '../api'
 
 const PAGE_SIZE = 20
+
+// 检测是否运行在 Tauri 环境
+const isTauri = () => typeof window !== 'undefined' && '__TAURI__' in window
 
 export default function CriminalListPage() {
   const [criminals, setCriminals] = useState<Criminal[]>([])
@@ -42,16 +18,25 @@ export default function CriminalListPage() {
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
 
-  const loadCriminals = useCallback((p: number, q: string) => {
+  const loadCriminals = useCallback(async (p: number, q: string) => {
     setLoading(true)
-    const filtered = q
-      ? mockCriminals.filter(c =>
-          c.name.includes(q) || c.criminal_id.includes(q) || c.crime.includes(q)
-        )
-      : mockCriminals
-    setCriminals(filtered)
-    setTotal(filtered.length)
-    setLoading(false)
+    try {
+      if (isTauri()) {
+        const [data, count] = await getCriminalsByPage(p, PAGE_SIZE, q)
+        setCriminals(data)
+        setTotal(count)
+      } else {
+        // Web 预览模式：静态数据
+        setCriminals([])
+        setTotal(0)
+      }
+    } catch (e) {
+      console.error('加载数据失败:', e)
+      setCriminals([])
+      setTotal(0)
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -139,8 +124,8 @@ export default function CriminalListPage() {
                   <td style={{ color: 'var(--text-muted)' }}>{page * PAGE_SIZE + i + 1}</td>
                   <td className="cell-mono">{c.criminal_id}</td>
                   <td>{c.name}</td>
-                  <td style={{ color: 'var(--text-secondary)' }}>{c.gender}</td>
-                  <td style={{ color: 'var(--text-secondary)' }}>{c.ethnicity}</td>
+                  <td style={{ color: 'var(--text-secondary)' }}>{c.gender || '—'}</td>
+                  <td style={{ color: 'var(--text-secondary)' }}>{c.ethnicity || '—'}</td>
                   <td style={{ color: 'var(--text-muted)', fontSize: 11 }}>{c.id_card_number || '—'}</td>
                   <td style={{ color: 'var(--text-secondary)' }}>{c.crime || c.crime_type || '—'}</td>
                   <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>

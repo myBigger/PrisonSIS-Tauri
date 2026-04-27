@@ -24,4 +24,5 @@ tauri-plugin-log = { version = "2", features = ["colored"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 sha2 = "0.10"
 hex = "0.4"
+md5 = "0.7"
 once_cell = "1.19"

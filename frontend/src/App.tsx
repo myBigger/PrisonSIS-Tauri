@@ -1,9 +1,10 @@
 // App.tsx — PrisonSIS Tauri 应用主入口
-import React, { useState } from 'react'
+import { useState } from 'react'
 import './index.css'
 import GlassSidebar from './components/GlassSidebar'
 import GlassHeader from './components/GlassHeader'
 import GlassStatusBar from './components/GlassStatusBar'
+import LoginPage from './pages/LoginPage'
 import HomePage from './pages/HomePage'
 import CriminalListPage from './pages/CriminalListPage'
 import RecordsPage from './pages/RecordsPage'
@@ -16,6 +17,12 @@ import ExportPage from './pages/ExportPage'
 import UsersPage from './pages/UsersPage'
 import BackupPage from './pages/BackupPage'
 import LogsPage from './pages/LogsPage'
+
+interface User {
+  username: string
+  real_name: string
+  role: string
+}
 
 const pages: Record<string, React.FC> = {
   home: HomePage,
@@ -35,8 +42,28 @@ const pages: Record<string, React.FC> = {
 export default function App() {
   const [currentPage, setCurrentPage] = useState('home')
   const [sidebarVisible, setSidebarVisible] = useState(true)
+  const [user, setUser] = useState<User | null>(() => {
+    // 检查本地存储的登录状态
+    const saved = localStorage.getItem('prisonsis_user')
+    return saved ? JSON.parse(saved) : null
+  })
 
   const PageComponent = pages[currentPage] || HomePage
+
+  const handleLoginSuccess = (loggedInUser: User) => {
+    localStorage.setItem('prisonsis_user', JSON.stringify(loggedInUser))
+    setUser(loggedInUser)
+  }
+
+  const handleLogout = () => {
+    localStorage.removeItem('prisonsis_user')
+    setUser(null)
+  }
+
+  // 未登录显示登录页
+  if (!user) {
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />
+  }
 
   return (
     <>
@@ -49,6 +76,8 @@ export default function App() {
           <GlassSidebar
             currentPage={currentPage}
             onNavigate={setCurrentPage}
+            user={user}
+            onLogout={handleLogout}
           />
         )}
 
@@ -57,6 +86,7 @@ export default function App() {
             currentPage={currentPage}
             onToggleSidebar={() => setSidebarVisible(v => !v)}
             onThemeSwitch={() => {}}
+            user={user}
           />
 
           <div className="glass-panel">

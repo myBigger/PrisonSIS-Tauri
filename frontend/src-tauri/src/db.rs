@@ -1,21 +1,34 @@
 // db.rs — PrisonSIS 数据库层
-// 直接对接现有 SQLite 数据库（与 Qt 共享同一文件）
-use md5::Digest as Md5Digest;
 use once_cell::sync::OnceCell;
 use rusqlite::{params, Connection, Result as SqlResult};
-use serde::ser::Serialize as SerSerialize;
-use serde::de::Deserialize as DeDeserialize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::io::Write;
+use std::sync::Mutex;
 
-static DB: OnceCell<Connection> = OnceCell::new();
+static DB_PATH: Mutex<Option<String>> = Mutex::new(None);
 
-// ── 数据库初始化 ──────────────────────────────────────────
 pub fn init(db_path: &str) -> SqlResult<()> {
+    // 测试连接
     let conn = Connection::open(db_path)?;
     conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
-    DB.set(conn).ok();
-    log::info!("[DB] SQLite 连接已建立: {}", db_path);
+
+    // 执行初始化 SQL 脚本
+    if let Ok(sql) = std::fs::read_to_string("src/init_db.sql") {
+        if let Err(e) = conn.execute_batch(&sql) {
+            log::warn!("[DB] 初始化脚本执行失败: {}", e);
+        } else {
+            log::info!("[DB] 数据库初始化脚本执行成功");
+        }
+    } else {
+        log::info!("[DB] 未找到初始化脚本，使用现有数据");
+    }
+
+    drop(conn);
+
+    let mut path = DB_PATH.lock().unwrap();
+    *path = Some(db_path.to_string());
+    log::info!("[DB] SQLite 连接路径已设置: {}", db_path);
     Ok(())
 }
 
@@ -23,11 +36,13 @@ fn with_db<F, T>(f: F) -> Result<T, String>
 where
     F: FnOnce(&Connection) -> SqlResult<T>,
 {
-    let conn = DB.get().ok_or("数据库未初始化")?;
-    f(conn).map_err(|e| e.to_string())
+    let path = DB_PATH.lock().unwrap();
+    let db_path = path.as_ref().ok_or("数据库未初始化".to_string())?;
+    let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
+    f(&conn).map_err(|e| e.to_string())
 }
 
-// ── 密码验证（复刻 Qt PasswordHasher.cpp）────────────────
+// ── 密码验证 ─────────────────────────────────────────────
 fn verify_password(password: &str, stored_hash: &str) -> bool {
     if stored_hash.starts_with("$pbkdf2$") {
         let parts: Vec<&str> = stored_hash.split('$').collect();
@@ -75,14 +90,14 @@ fn pbkdf2_sha256(password: &[u8], salt: &[u8], iterations: u32) -> Vec<u8> {
     while accumulated.len() < 32 {
         block[salt.len()..].copy_from_slice(&block_index.to_be_bytes());
         let mut u = {
-            let mut inner = sha2::Sha256::new();
+            let mut inner = Sha256::new();
             inner.update(&hmac_inner);
             inner.update(&block);
             inner.finalize()
         };
         let mut result_block = u.to_vec();
         for _ in 1..iterations {
-            let mut inner = sha2::Sha256::new();
+            let mut inner = Sha256::new();
             inner.update(&hmac_inner);
             inner.update(&u);
             u = inner.finalize();
@@ -98,7 +113,7 @@ fn pbkdf2_sha256(password: &[u8], salt: &[u8], iterations: u32) -> Vec<u8> {
 }
 
 // ── 数据模型 ─────────────────────────────────────────────
-#[derive(Debug, Serialize, DeDeserialize, SerSerialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct User {
     pub id: i64,
     pub user_id: String,
@@ -111,7 +126,7 @@ pub struct User {
     pub enabled: bool,
 }
 
-#[derive(Debug, Serialize, DeDeserialize, SerSerialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Criminal {
     pub id: i64,
     pub criminal_id: String,
@@ -143,7 +158,7 @@ pub struct Criminal {
     pub created_at: String,
 }
 
-#[derive(Debug, Serialize, DeDeserialize, SerSerialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Record {
     pub id: i64,
     pub record_id: String,
@@ -169,7 +184,7 @@ pub struct Record {
     pub created_at: String,
 }
 
-#[derive(Debug, Serialize, DeDeserialize, SerSerialize)]
+#[derive(Debug, Serialize)]
 pub struct DashboardStats {
     pub today_records: i64,
     pub pending_approvals: i64,
@@ -258,10 +273,14 @@ pub fn get_criminals() -> Result<Vec<Criminal>, String> {
                     COALESCE(custody_location,'') as custody_location,
                     COALESCE(bed_number,'') as bed_number,
                     COALESCE(contact_phone,'') as contact_phone, created_at
-             FROM criminals ORDER BY id DESC LIMIT 200"
+             FROM criminals ORDER BY id DESC LIMIT 200",
         )?;
         let rows = stmt.query_map([], map_criminal)?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+        let mut criminals = Vec::new();
+        for row in rows {
+            criminals.push(row?);
+        }
+        Ok(criminals)
     })
 }
 
@@ -317,7 +336,9 @@ pub fn get_criminals_by_page(
 
         let offset = page * page_size;
 
-        let rows = if search.is_empty() {
+        let mut criminals = Vec::new();
+
+        if search.is_empty() {
             let mut stmt = conn.prepare(
                 "SELECT id, criminal_id, name, gender, ethnicity, birth_date,
                         id_card_number, native_place, education, crime,
@@ -329,9 +350,12 @@ pub fn get_criminals_by_page(
                         COALESCE(custody_location,'') as custody_location,
                         COALESCE(bed_number,'') as bed_number,
                         COALESCE(contact_phone,'') as contact_phone, created_at
-                 FROM criminals ORDER BY id DESC LIMIT ?1 OFFSET ?2"
+                 FROM criminals ORDER BY id DESC LIMIT ?1 OFFSET ?2",
             )?;
-            stmt.query_map(params![page_size, offset], map_criminal)?
+            let rows = stmt.query_map(params![page_size, offset], map_criminal)?;
+            for row in rows {
+                criminals.push(row?);
+            }
         } else {
             let mut stmt = conn.prepare(
                 "SELECT id, criminal_id, name, gender, ethnicity, birth_date,
@@ -346,17 +370,17 @@ pub fn get_criminals_by_page(
                         COALESCE(contact_phone,'') as contact_phone, created_at
                  FROM criminals
                  WHERE name LIKE ?3 OR criminal_id LIKE ?3 OR crime LIKE ?3
-                 ORDER BY id DESC LIMIT ?1 OFFSET ?2"
+                 ORDER BY id DESC LIMIT ?1 OFFSET ?2",
             )?;
-            stmt.query_map(
+            let rows = stmt.query_map(
                 params![page_size, offset, format!("%{}%", search)],
                 map_criminal,
-            )?
-        };
+            )?;
+            for row in rows {
+                criminals.push(row?);
+            }
+        }
 
-        let criminals: Vec<Criminal> = rows
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
         Ok((criminals, total))
     })
 }
@@ -379,8 +403,9 @@ pub fn get_records(
         };
 
         let offset = page * page_size;
+        let mut records = Vec::new();
 
-        let rows = if search.is_empty() {
+        if search.is_empty() {
             let mut stmt = conn.prepare(
                 "SELECT id, record_id, record_type, criminal_id, criminal_name,
                         record_date, record_location, interrogator_id, recorder_id,
@@ -392,9 +417,12 @@ pub fn get_records(
                         COALESCE(approver1_result,'') as approver1_result,
                         COALESCE(approver2_result,'') as approver2_result,
                         COALESCE(reject_reason,'') as reject_reason, created_at
-                 FROM records ORDER BY id DESC LIMIT ?1 OFFSET ?2"
+                 FROM records ORDER BY id DESC LIMIT ?1 OFFSET ?2",
             )?;
-            stmt.query_map(params![page_size, offset], map_record)?
+            let rows = stmt.query_map(params![page_size, offset], map_record)?;
+            for row in rows {
+                records.push(row?);
+            }
         } else {
             let mut stmt = conn.prepare(
                 "SELECT id, record_id, record_type, criminal_id, criminal_name,
@@ -409,17 +437,17 @@ pub fn get_records(
                         COALESCE(reject_reason,'') as reject_reason, created_at
                  FROM records
                  WHERE record_id LIKE ?3 OR criminal_name LIKE ?3
-                 ORDER BY id DESC LIMIT ?1 OFFSET ?2"
+                 ORDER BY id DESC LIMIT ?1 OFFSET ?2",
             )?;
-            stmt.query_map(
+            let rows = stmt.query_map(
                 params![page_size, offset, format!("%{}%", search)],
                 map_record,
-            )?
-        };
+            )?;
+            for row in rows {
+                records.push(row?);
+            }
+        }
 
-        let records: Vec<Record> = rows
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
         Ok((records, total))
     })
 }
@@ -465,10 +493,14 @@ pub fn get_recent_records(limit: i64) -> Result<Vec<Record>, String> {
                     COALESCE(approver1_result,'') as approver1_result,
                     COALESCE(approver2_result,'') as approver2_result,
                     COALESCE(reject_reason,'') as reject_reason, created_at
-             FROM records ORDER BY id DESC LIMIT ?1"
+             FROM records ORDER BY id DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![limit], map_record)?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row?);
+        }
+        Ok(records)
     })
 }
 
@@ -503,11 +535,9 @@ pub fn get_dashboard_stats() -> Result<DashboardStats, String> {
             .unwrap_or(0);
 
         let total_criminals: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM criminals WHERE archived=0",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM criminals WHERE archived=0", [], |r| {
+                r.get(0)
+            })
             .unwrap_or(0);
 
         let total_cases: i64 = conn
@@ -553,15 +583,19 @@ pub fn get_dashboard_stats() -> Result<DashboardStats, String> {
 
 fn chrono_date() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap();
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
     let secs = now.as_secs();
     let mut remaining = secs / 86400;
     let mut year: u64 = 1970;
     loop {
-        let days_in_year: u64 = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 366 } else { 365 };
-        if remaining < days_in_year { break; }
+        let days_in_year: u64 = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+            366
+        } else {
+            365
+        };
+        if remaining < days_in_year {
+            break;
+        }
         remaining -= days_in_year;
         year += 1;
     }
@@ -579,6 +613,7 @@ fn chrono_date() -> String {
     format!("{:04}-{:02}-{:02}", year, month + 1, day + 1)
 }
 
+#[tauri::command]
 pub fn add_criminal(c: Criminal) -> Result<i64, String> {
     with_db(|conn| {
         conn.execute(

@@ -1,10 +1,17 @@
 // GlassHeader.tsx — 毛玻璃顶部状态栏
 import React from 'react'
 
+interface User {
+  username: string
+  real_name: string
+  role: string
+}
+
 interface Props {
   currentPage: string
   onToggleSidebar: () => void
   onThemeSwitch: (theme: string) => void
+  user: User
 }
 
 const pageTitles: Record<string, string> = {
@@ -22,7 +29,7 @@ const pageTitles: Record<string, string> = {
   logs: '日志审计',
 }
 
-export default function GlassHeader({ currentPage, onToggleSidebar, onThemeSwitch }: Props) {
+export default function GlassHeader({ currentPage, onToggleSidebar, onThemeSwitch, user }: Props) {
   return (
     <header className="header">
       <button className="glass-btn icon-btn" onClick={onToggleSidebar} title="切换侧栏">
@@ -42,6 +49,11 @@ export default function GlassHeader({ currentPage, onToggleSidebar, onThemeSwitc
         <button className="glass-btn" onClick={() => onThemeSwitch('dark')}>深色</button>
         <button className="glass-btn" onClick={() => onThemeSwitch('light')}>浅色</button>
         <button className="glass-btn primary" onClick={() => onThemeSwitch('glassmorphism')}>毛玻璃</button>
+      </div>
+
+      {/* 用户信息 */}
+      <div className="header-user">
+        <span>{user.real_name || user.username}</span>
       </div>
 
       {/* 通知 */}
