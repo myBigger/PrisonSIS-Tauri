@@ -11,10 +11,8 @@ permissions:
   packages: write
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
-    permissions:
-      contents: write
+  build:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,82 +26,29 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - name: Install frontend dependencies
-        run: |
-          cd frontend
-          npm ci
-
-      - name: Build Tauri
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: v__VERSION__
-          releaseName: 'PrisonSIS v__VERSION__'
-          releaseBody: |
-            PrisonSIS 监狱审讯笔录系统 Tauri 版本
-
-            ### 支持平台
-            - Windows x64
-            - Linux x64
-
-            ### 主要功能
-            - 服刑人员管理
-            - 笔录制作与管理
-            - 审批流程
-            - 数据统计
-          releaseDraft: true
-          prerelease: false
-
-  build-linux:
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libglib2.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Install frontend dependencies
         run: |
           cd frontend
           npm ci
 
       - name: Build Tauri
-        uses: tauri-apps/tauri-action@v0
+        run: |
+          cd frontend
+          npm run tauri:build
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            frontend/src-tauri/target/release/bundle/deb/*.deb
+            frontend/src-tauri/target/release/bundle/rpm/*.rpm
+          draft: true
+          generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: v__VERSION__
-          releaseName: 'PrisonSIS v__VERSION__'
-          releaseBody: |
-            PrisonSIS 监狱审讯笔录系统 Tauri 版本
-
-            ### 支持平台
-            - Windows x64
-            - Linux x64
-
-            ### 主要功能
-            - 服刑人员管理
-            - 笔录制作与管理
-            - 审批流程
-            - 数据统计
-          releaseDraft: true
-          prerelease: false
