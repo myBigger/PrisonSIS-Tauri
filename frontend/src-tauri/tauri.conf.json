@@ -5,6 +5,7 @@
   "identifier": "com.prisonsis.app",
   "build": {
     "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173/PrisonSIS-Tauri",
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build"
   },

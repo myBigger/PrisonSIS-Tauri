@@ -5,5 +5,5 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   // GitHub Pages 子目录部署，必须配置 base
-  base: '/PrisonSIS-Tauri/',
+  base: process.env.TAURI_ENV_PLATFORM !== undefined ? '/' : '/PrisonSIS-Tauri/',
 })
