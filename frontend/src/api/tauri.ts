@@ -4,9 +4,10 @@ import type {
   User,
   Criminal,
   Record,
+  RecordInput,
   DashboardStats,
   LoginResult,
-  PageResult,
+  Template,
 } from './types'
 
 // ── 认证 ────────────────────────────────────────────────
@@ -40,16 +41,39 @@ export async function updateCriminal(criminal: Criminal): Promise<void> {
 }
 
 // ── 笔录 ────────────────────────────────────────────────
+/** @param statusFilter 空字符串=全部；否则为 Draft/Pending/Approved/Rejected */
 export async function getRecordsByPage(
   page: number,
   pageSize: number,
-  search: string = ''
+  search: string = '',
+  statusFilter: string = ''
 ): Promise<[Record[], number]> {
-  return invoke<[Record[], number]>('get_records', { page, pageSize, search })
+  return invoke<[Record[], number]>('get_records', {
+    page,
+    pageSize,
+    search,
+    statusFilter,
+  })
+}
+
+export async function getRecordById(id: number): Promise<Record> {
+  return invoke<Record>('get_record_by_id', { id })
+}
+
+export async function addRecord(input: RecordInput): Promise<Record> {
+  return invoke<Record>('add_record', { input })
+}
+
+export async function updateRecord(record: Record): Promise<void> {
+  return invoke<void>('update_record', { record })
 }
 
 export async function getRecentRecords(limit: number = 10): Promise<Record[]> {
   return invoke<Record[]>('get_recent_records', { limit })
+}
+
+export async function getTemplates(): Promise<Template[]> {
+  return invoke<Template[]>('get_templates')
 }
 
 // ── 仪表盘 ──────────────────────────────────────────────

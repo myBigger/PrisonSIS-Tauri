@@ -107,12 +107,12 @@ CREATE INDEX IF NOT EXISTS idx_logs_user_id ON logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs(created_at);
 
 -- 插入默认管理员用户 (密码: admin123)
--- 密码哈希: $pbkdf2$120000$<salt>$<hash> 格式
+-- 与 db.rs verify_password 一致：MD5("{password}_prison_salt_2024")
 INSERT OR IGNORE INTO users (user_id, username, password_hash, real_name, role, department, position, enabled)
 VALUES (
     'U001',
     'admin',
-    '$pbkdf2$120000$7c4a8d09ca3762af61e59520943dc264$94f0aa8c7e9d8b3c5a7e8d9f0c1b2a3e4f5d6c7b8a9f0e1d2c3b4a5968778',
+    '3578e7a11fad49d8381dc4251900405f',
     '系统管理员',
     'Admin',
     '系统管理部',
@@ -120,18 +120,22 @@ VALUES (
     1
 );
 
--- 插入测试用户 (密码: user123)
+-- 插入测试用户 (密码: 123456)
 INSERT OR IGNORE INTO users (user_id, username, password_hash, real_name, role, department, position, enabled)
 VALUES (
     'U002',
     'operator',
-    'e10adc3949ba59abbe56e057f20f883e',  -- MD5: 123456
+    '6ff59634a0f44f979afb161453a44100',
     '操作员',
     'User',
     '审讯科',
     '审讯员',
     1
 );
+
+-- 已有库升级：覆盖错误/过期的密码哈希（每次启动执行）
+UPDATE users SET password_hash = '3578e7a11fad49d8381dc4251900405f' WHERE username = 'admin' AND user_id = 'U001';
+UPDATE users SET password_hash = '6ff59634a0f44f979afb161453a44100' WHERE username = 'operator' AND user_id = 'U002';
 
 -- 插入测试服刑人员数据
 INSERT OR IGNORE INTO criminals (criminal_id, name, gender, ethnicity, birth_date, id_card_number, native_place, education, crime, sentence_years, sentence_months, entry_date, district, cell, crime_type, manage_level)
@@ -150,3 +154,90 @@ VALUES
     ('BL-2026-0003', '问询', 3, '王某', '2026-04-23 10:00', '审讯室A', 'U002', 'U002', '审讯员2人', '问询笔录内容...', 'Approved'),
     ('BL-2026-0004', '问询', 4, '赵某', '2026-04-22 16:45', '审讯室C', 'U002', 'U002', '审讯员2人', '问询笔录内容...', 'Approved'),
     ('BL-2026-0005', '审讯', 5, '刘某', '2026-04-22 09:00', '审讯室A', 'U002', 'U002', '审讯员2人', '审讯笔录内容...', 'Draft');
+
+-- 笔录模板（固定 id 便于 INSERT OR IGNORE 幂等；监狱执法场景用语）
+INSERT OR IGNORE INTO templates (id, name, category, content, created_by) VALUES
+(1, '入监谈话笔录', 'RT-01', '监狱服刑人员入监谈话笔录（模板）
+
+谈话时间：[谈话日期]
+谈话地点：（依实际填写）
+谈话人：（民警姓名、警号等）
+记录人：
+
+一、人员基本情况
+服刑人员姓名：[服刑人员姓名]
+（以下内容依档案据实填写或由其自述）
+
+二、权利义务告知与监规纪律教育要点
+（宣告申诉、控告途径；遵守监规、服从管理等）
+
+三、谈话要点及服刑人员陈述摘要
+
+
+四、服刑人员签名确认（当面签名）
+服刑人员（签名）：____________  
+谈话人（签名）：____________  
+记录人（签名）：____________  
+', 'system'),
+(2, '个别教育谈话笔录', 'RT-02', '监狱个别教育谈话笔录（模板）
+
+谈话时间：[谈话日期]
+谈话地点：（依实际填写）
+谈话人：
+记录人：
+
+一、谈话事由与教育主题
+
+
+二、事实陈述与民警针对性教育内容摘要
+
+
+三、服刑人员认识态度与表态
+
+
+四、服刑人员签名确认（当面签名）
+服刑人员（签名）：____________  
+谈话人（签名）：____________  
+记录人（签名）：____________  
+', 'system'),
+(3, '提押（出庭）谈话笔录', 'RT-03', '监狱提押（出庭）相关谈话笔录（模板）
+
+谈话时间：[谈话日期]
+押解/执勤民警：
+记录人：
+
+一、法律依据与本次提押（出庭）事由说明
+
+
+二、纪律与安全注意事项告知摘要
+
+
+三、服刑人员陈述与确认事项
+
+
+四、服刑人员签名确认（当面签名）
+服刑人员（签名）：____________  
+谈话人（签名）：____________  
+记录人（签名）：____________  
+', 'system'),
+(4, '出监前谈话笔录', 'RT-04', '监狱出监前谈话笔录（模板）
+
+谈话时间：[谈话日期]
+谈话地点：
+谈话人：
+记录人：
+
+一、出监前权利义务与安置帮教衔接要点告知摘要
+
+
+二、服刑人员思想动态与困难诉求摘要
+
+
+三、谈话结论与服刑人员表态
+
+
+四、服刑人员签名确认（当面签名）
+服刑人员（签名）：____________  
+谈话人（签名）：____________  
+记录人（签名）：____________  
+', 'system');

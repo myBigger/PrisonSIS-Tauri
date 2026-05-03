@@ -6,7 +6,7 @@ import type { Criminal } from '../api'
 const PAGE_SIZE = 20
 
 // 检测是否运行在 Tauri 环境
-const isTauri = () => typeof window !== 'undefined' && '__TAURI__' in window
+import { isTauriRuntime as isTauri } from '../lib/tauriEnv'
 
 export default function CriminalListPage() {
   const [criminals, setCriminals] = useState<Criminal[]>([])

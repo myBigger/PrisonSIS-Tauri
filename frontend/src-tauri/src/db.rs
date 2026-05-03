@@ -1,5 +1,5 @@
 // db.rs — PrisonSIS 数据库层
-use once_cell::sync::OnceCell;
+use rusqlite::OptionalExtension;
 use rusqlite::{params, Connection, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -36,10 +36,14 @@ fn with_db<F, T>(f: F) -> Result<T, String>
 where
     F: FnOnce(&Connection) -> SqlResult<T>,
 {
-    let path = DB_PATH.lock().unwrap();
-    let db_path = path.as_ref().ok_or("数据库未初始化".to_string())?;
-    let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
+    let conn = db_conn()?;
     f(&conn).map_err(|e| e.to_string())
+}
+
+fn db_conn() -> Result<Connection, String> {
+    let path = DB_PATH.lock().unwrap();
+    let db_path = path.as_ref().ok_or_else(|| "数据库未初始化".to_string())?;
+    Connection::open(db_path.as_str()).map_err(|e| e.to_string())
 }
 
 // ── 密码验证 ─────────────────────────────────────────────
@@ -184,6 +188,19 @@ pub struct Record {
     pub created_at: String,
 }
 
+/// 新建笔录（服务端生成 `record_id`，默认 `Draft`）
+#[derive(Debug, Deserialize)]
+pub struct RecordInput {
+    pub record_type: String,
+    pub criminal_id: i64,
+    pub record_date: String,
+    pub record_location: String,
+    pub interrogator_id: String,
+    pub recorder_id: String,
+    pub present_persons: String,
+    pub content: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct DashboardStats {
     pub today_records: i64,
@@ -194,6 +211,16 @@ pub struct DashboardStats {
     pub expired_count: i64,
     pub month_new_criminals: i64,
     pub month_new_cases: i64,
+}
+
+/// 笔录正文模板（与 `templates` 表一致）
+#[derive(Debug, Serialize)]
+pub struct Template {
+    pub id: i64,
+    pub name: String,
+    pub category: String,
+    pub content: String,
+    pub created_at: String,
 }
 
 // ── Tauri Commands ───────────────────────────────────────
@@ -385,71 +412,286 @@ pub fn get_criminals_by_page(
     })
 }
 
+const RECORD_SELECT_SQL: &str =
+    "SELECT id, record_id, record_type, criminal_id, criminal_name,
+                        record_date, record_location, interrogator_id, recorder_id,
+                        present_persons, content, content_encrypted,
+                        signed_interrogator, signed_recorder, signed_subject,
+                        status,
+                        COALESCE(approver1_id,'') as approver1_id,
+                        COALESCE(approver2_id,'') as approver2_id,
+                        COALESCE(approver1_result,'') as approver1_result,
+                        COALESCE(approver2_result,'') as approver2_result,
+                        COALESCE(reject_reason,'') as reject_reason, created_at ";
+
 #[tauri::command]
 pub fn get_records(
     page: i64,
     page_size: i64,
     search: String,
+    status_filter: String,
 ) -> Result<(Vec<Record>, i64), String> {
-    with_db(|conn| {
-        let total: i64 = if search.is_empty() {
-            conn.query_row("SELECT COUNT(*) FROM records", [], |r| r.get(0))?
-        } else {
-            conn.query_row(
-                "SELECT COUNT(*) FROM records WHERE record_id LIKE ?1 OR criminal_name LIKE ?1",
-                params![format!("%{}%", search)],
-                |r| r.get(0),
-            )?
-        };
+    let search = search.trim().to_string();
+    let status_filter = status_filter.trim().to_string();
+    let has_search = !search.is_empty();
+    let has_status = !status_filter.is_empty();
 
+    with_db(|conn| {
         let offset = page * page_size;
         let mut records = Vec::new();
 
-        if search.is_empty() {
-            let mut stmt = conn.prepare(
-                "SELECT id, record_id, record_type, criminal_id, criminal_name,
-                        record_date, record_location, interrogator_id, recorder_id,
-                        present_persons, content, content_encrypted,
-                        signed_interrogator, signed_recorder, signed_subject,
-                        status,
-                        COALESCE(approver1_id,'') as approver1_id,
-                        COALESCE(approver2_id,'') as approver2_id,
-                        COALESCE(approver1_result,'') as approver1_result,
-                        COALESCE(approver2_result,'') as approver2_result,
-                        COALESCE(reject_reason,'') as reject_reason, created_at
-                 FROM records ORDER BY id DESC LIMIT ?1 OFFSET ?2",
-            )?;
-            let rows = stmt.query_map(params![page_size, offset], map_record)?;
-            for row in rows {
-                records.push(row?);
+        match (has_search, has_status) {
+            (false, false) => {
+                let total: i64 =
+                    conn.query_row("SELECT COUNT(*) FROM records", [], |r| r.get(0))?;
+                let mut stmt =
+                    conn.prepare(&format!("{RECORD_SELECT_SQL} FROM records ORDER BY id DESC LIMIT ?1 OFFSET ?2"))?;
+                let rows = stmt.query_map(params![page_size, offset], map_record)?;
+                for row in rows {
+                    records.push(row?);
+                }
+                Ok((records, total))
             }
-        } else {
-            let mut stmt = conn.prepare(
-                "SELECT id, record_id, record_type, criminal_id, criminal_name,
-                        record_date, record_location, interrogator_id, recorder_id,
-                        present_persons, content, content_encrypted,
-                        signed_interrogator, signed_recorder, signed_subject,
-                        status,
-                        COALESCE(approver1_id,'') as approver1_id,
-                        COALESCE(approver2_id,'') as approver2_id,
-                        COALESCE(approver1_result,'') as approver1_result,
-                        COALESCE(approver2_result,'') as approver2_result,
-                        COALESCE(reject_reason,'') as reject_reason, created_at
-                 FROM records
+            (false, true) => {
+                let total: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM records WHERE status = ?1",
+                    params![status_filter],
+                    |r| r.get(0),
+                )?;
+                let mut stmt = conn.prepare(&format!(
+                    "{RECORD_SELECT_SQL} FROM records WHERE status = ?3 ORDER BY id DESC LIMIT ?1 OFFSET ?2"
+                ))?;
+                let rows = stmt.query_map(params![page_size, offset, status_filter], map_record)?;
+                for row in rows {
+                    records.push(row?);
+                }
+                Ok((records, total))
+            }
+            (true, false) => {
+                let pat = format!("%{}%", search);
+                let total: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM records WHERE record_id LIKE ?1 OR criminal_name LIKE ?1",
+                    params![pat],
+                    |r| r.get(0),
+                )?;
+                let mut stmt = conn.prepare(&format!(
+                    "{RECORD_SELECT_SQL} FROM records
                  WHERE record_id LIKE ?3 OR criminal_name LIKE ?3
-                 ORDER BY id DESC LIMIT ?1 OFFSET ?2",
-            )?;
-            let rows = stmt.query_map(
-                params![page_size, offset, format!("%{}%", search)],
-                map_record,
-            )?;
-            for row in rows {
-                records.push(row?);
+                 ORDER BY id DESC LIMIT ?1 OFFSET ?2"
+                ))?;
+                let rows = stmt.query_map(params![page_size, offset, pat], map_record)?;
+                for row in rows {
+                    records.push(row?);
+                }
+                Ok((records, total))
+            }
+            (true, true) => {
+                let pat = format!("%{}%", search);
+                let total: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM records WHERE status = ?1 AND (record_id LIKE ?2 OR criminal_name LIKE ?2)",
+                    params![status_filter, pat],
+                    |r| r.get(0),
+                )?;
+                let mut stmt = conn.prepare(&format!(
+                    "{RECORD_SELECT_SQL} FROM records
+                 WHERE status = ?3 AND (record_id LIKE ?4 OR criminal_name LIKE ?4)
+                 ORDER BY id DESC LIMIT ?1 OFFSET ?2"
+                ))?;
+                let rows =
+                    stmt.query_map(params![page_size, offset, status_filter, pat], map_record)?;
+                for row in rows {
+                    records.push(row?);
+                }
+                Ok((records, total))
             }
         }
-
-        Ok((records, total))
     })
+}
+
+fn fetch_record(conn: &Connection, id: i64) -> SqlResult<Record> {
+    conn.query_row(
+        &format!("{RECORD_SELECT_SQL} FROM records WHERE id = ?1"),
+        params![id],
+        map_record,
+    )
+}
+
+/// 次年递增编号：`BL-{年}-XXXX`
+fn next_record_id(conn: &Connection) -> SqlResult<String> {
+    let today = chrono_date();
+    let year: String = today.chars().take(4).collect();
+    let prefix = format!("BL-{year}-");
+    let pattern = format!("{prefix}%");
+    let last: Option<String> = conn
+        .query_row(
+            "SELECT record_id FROM records WHERE record_id LIKE ?1 ORDER BY record_id DESC LIMIT 1",
+            params![pattern],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let seq = match last {
+        Some(rid) => rid
+            .rsplit('-')
+            .next()
+            .and_then(|s| s.parse::<u32>().ok())
+            .map(|n| n.saturating_add(1))
+            .unwrap_or(1),
+        None => 1,
+    };
+    Ok(format!("{prefix}{seq:04}"))
+}
+
+#[tauri::command]
+pub fn get_record_by_id(id: i64) -> Result<Record, String> {
+    let conn = db_conn()?;
+    fetch_record(&conn, id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_templates() -> Result<Vec<Template>, String> {
+    with_db(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, name, COALESCE(category,''), COALESCE(content,''),
+                    COALESCE(created_at,'') FROM templates ORDER BY id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Template {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                category: row.get(2)?,
+                content: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    })
+}
+
+#[tauri::command]
+pub fn add_record(input: RecordInput) -> Result<Record, String> {
+    let rt = input.record_type.trim().to_string();
+    if rt.is_empty() {
+        return Err("笔录类型不能为空".into());
+    }
+    if input.criminal_id <= 0 {
+        return Err("请选择服刑人员".into());
+    }
+
+    let conn = db_conn()?;
+    let exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM criminals WHERE id = ?1)",
+            params![input.criminal_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !exists {
+        return Err("服刑人员不存在或已删除".into());
+    }
+
+    let criminal_name: String = conn
+        .query_row(
+            "SELECT COALESCE(name,'') FROM criminals WHERE id = ?1",
+            params![input.criminal_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    let record_id = next_record_id(&conn).map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO records (
+                record_id, record_type, criminal_id, criminal_name,
+                record_date, record_location, interrogator_id, recorder_id,
+                present_persons, content, content_encrypted,
+                signed_interrogator, signed_recorder, signed_subject, status)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,0,0,0,0,'Draft')",
+        params![
+            record_id,
+            rt,
+            input.criminal_id,
+            criminal_name,
+            input.record_date.trim(),
+            input.record_location.trim(),
+            input.interrogator_id.trim(),
+            input.recorder_id.trim(),
+            input.present_persons.trim(),
+            input.content,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let new_id = conn.last_insert_rowid();
+    fetch_record(&conn, new_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_record(record: Record) -> Result<(), String> {
+    if record.id <= 0 {
+        return Err("无效笔录 id".into());
+    }
+    if record.record_type.trim().is_empty() {
+        return Err("笔录类型不能为空".into());
+    }
+    if record.criminal_id <= 0 {
+        return Err("请选择服刑人员".into());
+    }
+
+    let conn = db_conn()?;
+    let status: String = conn
+        .query_row(
+            "SELECT COALESCE(status,'') FROM records WHERE id = ?1",
+            params![record.id],
+            |r| r.get(0),
+        )
+        .map_err(|_| "笔录不存在".to_string())?;
+    if status != "Draft" {
+        return Err("仅草稿状态可编辑".into());
+    }
+
+    let exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM criminals WHERE id = ?1)",
+            params![record.criminal_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !exists {
+        return Err("服刑人员不存在或已删除".into());
+    }
+
+    let criminal_name: String = conn
+        .query_row(
+            "SELECT COALESCE(name,'') FROM criminals WHERE id = ?1",
+            params![record.criminal_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "UPDATE records SET
+                record_type = ?2, criminal_id = ?3, criminal_name = ?4,
+                record_date = ?5, record_location = ?6,
+                interrogator_id = ?7, recorder_id = ?8, present_persons = ?9, content = ?10
+             WHERE id = ?1",
+        params![
+            record.id,
+            record.record_type.trim(),
+            record.criminal_id,
+            criminal_name,
+            record.record_date.trim(),
+            record.record_location.trim(),
+            record.interrogator_id.trim(),
+            record.recorder_id.trim(),
+            record.present_persons.trim(),
+            record.content,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 fn map_record(row: &rusqlite::Row) -> rusqlite::Result<Record> {

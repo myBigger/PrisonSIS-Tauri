@@ -2626,7 +2626,6 @@ dependencies = [
  "hex",
  "log",
  "md5",
- "once_cell",
  "rusqlite",
  "serde",
  "serde_json",

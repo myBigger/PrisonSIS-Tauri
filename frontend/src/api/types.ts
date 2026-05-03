@@ -43,6 +43,18 @@ export interface Criminal {
   created_at: string
 }
 
+/** 新建笔录（由后端生成 record_id，默认草稿） */
+export interface RecordInput {
+  record_type: string
+  criminal_id: number
+  record_date: string
+  record_location: string
+  interrogator_id: string
+  recorder_id: string
+  present_persons: string
+  content: string
+}
+
 export interface Record {
   id: number
   record_id: string
@@ -88,4 +100,13 @@ export interface LoginResult {
 export interface PageResult<T> {
   data: T[]
   total: number
+}
+
+/** 与 SQLite `templates` 表及 Rust `Template` 一致 */
+export interface Template {
+  id: number
+  name: string
+  category: string
+  content: string
+  created_at: string
 }

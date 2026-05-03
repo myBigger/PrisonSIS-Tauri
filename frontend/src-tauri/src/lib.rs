@@ -4,7 +4,7 @@ mod db;
 use std::path::PathBuf;
 use tauri::Manager;
 
-#[cfg_attr(mobilinit, tauri::mobile_entry_point)]
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
@@ -56,6 +56,10 @@ pub fn run() {
             db::update_criminal,
             // 笔录管理
             db::get_records,
+            db::get_record_by_id,
+            db::add_record,
+            db::update_record,
+            db::get_templates,
             db::get_recent_records,
             // 仪表盘
             db::get_dashboard_stats,

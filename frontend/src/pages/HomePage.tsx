@@ -32,7 +32,7 @@ const statusLabel = (s: string) => {
 }
 
 // 检测是否运行在 Tauri 环境
-const isTauri = () => typeof window !== 'undefined' && '__TAURI__' in window
+import { isTauriRuntime as isTauri } from '../lib/tauriEnv'
 
 export default function HomePage() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
