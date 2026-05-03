@@ -48,6 +48,20 @@ CREATE TABLE IF NOT EXISTS criminals (
     created_at TEXT DEFAULT (datetime('now', 'localtime'))
 );
 
+-- 案件表（阶段 3 最小列）
+CREATE TABLE IF NOT EXISTS cases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_number TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open',
+    remark TEXT,
+    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_cases_number ON cases(case_number);
+CREATE INDEX IF NOT EXISTS idx_cases_status ON cases(status);
+
 -- 笔录表
 CREATE TABLE IF NOT EXISTS records (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,8 +85,10 @@ CREATE TABLE IF NOT EXISTS records (
     approver1_result TEXT,
     approver2_result TEXT,
     reject_reason TEXT,
+    case_id INTEGER,
     created_at TEXT DEFAULT (datetime('now', 'localtime')),
-    FOREIGN KEY (criminal_id) REFERENCES criminals(id)
+    FOREIGN KEY (criminal_id) REFERENCES criminals(id),
+    FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE RESTRICT
 );
 
 -- 模板表
@@ -82,7 +98,8 @@ CREATE TABLE IF NOT EXISTS templates (
     category TEXT,
     content TEXT,
     created_by TEXT,
-    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+    deleted_at TEXT
 );
 
 -- 日志表
@@ -105,6 +122,7 @@ CREATE INDEX IF NOT EXISTS idx_records_criminal_id ON records(criminal_id);
 CREATE INDEX IF NOT EXISTS idx_records_status ON records(status);
 CREATE INDEX IF NOT EXISTS idx_logs_user_id ON logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_templates_deleted_at ON templates(deleted_at);
 
 -- 插入默认管理员用户 (密码: admin123)
 -- 与 db.rs verify_password 一致：MD5("{password}_prison_salt_2024")

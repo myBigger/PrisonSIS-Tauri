@@ -24,6 +24,9 @@ pub fn init(db_path: &str) -> SqlResult<()> {
         log::info!("[DB] 未找到初始化脚本，使用现有数据");
     }
 
+    ensure_cases_schema(&conn)?;
+    ensure_stage4_schema(&conn)?;
+
     drop(conn);
 
     let mut path = DB_PATH.lock().unwrap();
@@ -44,6 +47,71 @@ fn db_conn() -> Result<Connection, String> {
     let path = DB_PATH.lock().unwrap();
     let db_path = path.as_ref().ok_or_else(|| "数据库未初始化".to_string())?;
     Connection::open(db_path.as_str()).map_err(|e| e.to_string())
+}
+
+/// 阶段 3：已有库仅有 `records`、无 `cases`/`case_id` 时的增量迁移（`CREATE TABLE IF NOT EXISTS records` 不会改旧表结构）。
+fn ensure_cases_schema(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        r"CREATE TABLE IF NOT EXISTS cases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            case_number TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'open',
+            remark TEXT,
+            created_at TEXT DEFAULT (datetime('now', 'localtime')),
+            updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+        );",
+    )?;
+    conn.execute_batch(
+        r"CREATE INDEX IF NOT EXISTS idx_cases_number ON cases(case_number);
+          CREATE INDEX IF NOT EXISTS idx_cases_status ON cases(status);",
+    )?;
+    let has_case_col: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('records') WHERE name='case_id'",
+        [],
+        |r| r.get(0),
+    )?;
+    if has_case_col == 0 {
+        conn.execute(
+            "ALTER TABLE records ADD COLUMN case_id INTEGER REFERENCES cases(id) ON DELETE RESTRICT",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+/// 阶段 4 增量迁移：模板软删字段。
+fn ensure_stage4_schema(conn: &Connection) -> SqlResult<()> {
+    let has_deleted_at_col: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('templates') WHERE name='deleted_at'",
+        [],
+        |r| r.get(0),
+    )?;
+    if has_deleted_at_col == 0 {
+        conn.execute("ALTER TABLE templates ADD COLUMN deleted_at TEXT", [])?;
+    }
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_templates_deleted_at ON templates(deleted_at)",
+        [],
+    )?;
+    Ok(())
+}
+
+fn validate_case_ref(conn: &Connection, case_id: Option<i64>) -> Result<(), String> {
+    let Some(cid) = case_id.filter(|&id| id > 0) else {
+        return Ok(());
+    };
+    let exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM cases WHERE id = ?1)",
+            params![cid],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !exists {
+        return Err("关联案件不存在".into());
+    }
+    Ok(())
 }
 
 // ── 密码验证 ─────────────────────────────────────────────
@@ -185,6 +253,10 @@ pub struct Record {
     pub approver1_result: String,
     pub approver2_result: String,
     pub reject_reason: String,
+    #[serde(default)]
+    pub case_id: Option<i64>,
+    #[serde(default)]
+    pub case_number: String,
     pub created_at: String,
 }
 
@@ -199,6 +271,30 @@ pub struct RecordInput {
     pub recorder_id: String,
     pub present_persons: String,
     pub content: String,
+    #[serde(default)]
+    pub case_id: Option<i64>,
+}
+
+/// 案件（与 `cases` 表最小列一致）
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Case {
+    pub id: i64,
+    pub case_number: String,
+    pub title: String,
+    pub status: String,
+    pub remark: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CaseInput {
+    pub case_number: String,
+    pub title: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub remark: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -214,13 +310,37 @@ pub struct DashboardStats {
 }
 
 /// 笔录正文模板（与 `templates` 表一致）
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Template {
     pub id: i64,
     pub name: String,
     pub category: String,
     pub content: String,
     pub created_at: String,
+    pub deleted_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TemplateInput {
+    pub name: String,
+    #[serde(default)]
+    pub category: String,
+    #[serde(default)]
+    pub content: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ExportRecordFilter {
+    #[serde(default)]
+    pub keyword: String,
+    #[serde(default)]
+    pub status: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExportResult {
+    pub file_path: String,
+    pub exported_count: i64,
 }
 
 // ── Tauri Commands ───────────────────────────────────────
@@ -412,17 +532,138 @@ pub fn get_criminals_by_page(
     })
 }
 
+#[tauri::command]
+pub fn get_archive_criminals_by_page(
+    page: i64,
+    page_size: i64,
+    search: String,
+    archived_filter: String,
+) -> Result<(Vec<Criminal>, i64), String> {
+    let search = search.trim().to_string();
+    let archived_filter = archived_filter.trim().to_string();
+    with_db(|conn| {
+        let offset = page * page_size;
+        let has_search = !search.is_empty();
+        let mut criminals = Vec::new();
+        let archived_clause = match archived_filter.as_str() {
+            "archived" => "archived = 1",
+            "active" => "archived = 0",
+            _ => "1 = 1",
+        };
+
+        let total: i64 = if has_search {
+            let pat = format!("%{}%", search);
+            conn.query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM criminals WHERE {archived_clause} AND (name LIKE ?1 OR criminal_id LIKE ?1 OR crime LIKE ?1)"
+                ),
+                params![pat],
+                |r| r.get(0),
+            )?
+        } else {
+            conn.query_row(
+                &format!("SELECT COUNT(*) FROM criminals WHERE {archived_clause}"),
+                [],
+                |r| r.get(0),
+            )?
+        };
+
+        if has_search {
+            let pat = format!("%{}%", search);
+            let mut stmt = conn.prepare(&format!(
+                "SELECT id, criminal_id, name, gender, ethnicity, birth_date,
+                        id_card_number, native_place, education, crime,
+                        sentence_years, sentence_months, entry_date, original_court,
+                        district, cell, crime_type, manage_level, handler_id,
+                        photo_path, remark, archived,
+                        COALESCE(case_number,'') as case_number,
+                        COALESCE(custody_date,'') as custody_date,
+                        COALESCE(custody_location,'') as custody_location,
+                        COALESCE(bed_number,'') as bed_number,
+                        COALESCE(contact_phone,'') as contact_phone, created_at
+                 FROM criminals
+                 WHERE {archived_clause} AND (name LIKE ?3 OR criminal_id LIKE ?3 OR crime LIKE ?3)
+                 ORDER BY id DESC LIMIT ?1 OFFSET ?2"
+            ))?;
+            let rows = stmt.query_map(params![page_size, offset, pat], map_criminal)?;
+            for row in rows {
+                criminals.push(row?);
+            }
+        } else {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT id, criminal_id, name, gender, ethnicity, birth_date,
+                        id_card_number, native_place, education, crime,
+                        sentence_years, sentence_months, entry_date, original_court,
+                        district, cell, crime_type, manage_level, handler_id,
+                        photo_path, remark, archived,
+                        COALESCE(case_number,'') as case_number,
+                        COALESCE(custody_date,'') as custody_date,
+                        COALESCE(custody_location,'') as custody_location,
+                        COALESCE(bed_number,'') as bed_number,
+                        COALESCE(contact_phone,'') as contact_phone, created_at
+                 FROM criminals
+                 WHERE {archived_clause}
+                 ORDER BY id DESC LIMIT ?1 OFFSET ?2"
+            ))?;
+            let rows = stmt.query_map(params![page_size, offset], map_criminal)?;
+            for row in rows {
+                criminals.push(row?);
+            }
+        }
+
+        Ok((criminals, total))
+    })
+}
+
+#[tauri::command]
+pub fn archive_criminal(id: i64) -> Result<(), String> {
+    if id <= 0 {
+        return Err("无效服刑人员 id".into());
+    }
+    with_db(|conn| {
+        let n = conn.execute("UPDATE criminals SET archived = 1 WHERE id = ?1", params![id])?;
+        if n == 0 {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
+        Ok(())
+    })
+    .map_err(|_| "服刑人员不存在".to_string())
+}
+
+#[tauri::command]
+pub fn unarchive_criminal(id: i64, user_role: String) -> Result<(), String> {
+    if id <= 0 {
+        return Err("无效服刑人员 id".into());
+    }
+    if user_role.trim() != "Admin" {
+        return Err("仅管理员可取消归档".into());
+    }
+    with_db(|conn| {
+        let n = conn.execute("UPDATE criminals SET archived = 0 WHERE id = ?1", params![id])?;
+        if n == 0 {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
+        Ok(())
+    })
+    .map_err(|_| "服刑人员不存在".to_string())
+}
+
 const RECORD_SELECT_SQL: &str =
-    "SELECT id, record_id, record_type, criminal_id, criminal_name,
-                        record_date, record_location, interrogator_id, recorder_id,
-                        present_persons, content, content_encrypted,
-                        signed_interrogator, signed_recorder, signed_subject,
-                        status,
-                        COALESCE(approver1_id,'') as approver1_id,
-                        COALESCE(approver2_id,'') as approver2_id,
-                        COALESCE(approver1_result,'') as approver1_result,
-                        COALESCE(approver2_result,'') as approver2_result,
-                        COALESCE(reject_reason,'') as reject_reason, created_at ";
+    "SELECT r.id, r.record_id, r.record_type, r.criminal_id, r.criminal_name,
+            r.record_date, r.record_location, r.interrogator_id, r.recorder_id,
+            r.present_persons, r.content, r.content_encrypted,
+            r.signed_interrogator, r.signed_recorder, r.signed_subject,
+            r.status,
+            COALESCE(r.approver1_id,'') as approver1_id,
+            COALESCE(r.approver2_id,'') as approver2_id,
+            COALESCE(r.approver1_result,'') as approver1_result,
+            COALESCE(r.approver2_result,'') as approver2_result,
+            COALESCE(r.reject_reason,'') as reject_reason,
+            r.case_id,
+            COALESCE(c.case_number,'') as case_number,
+            COALESCE(r.created_at,'') as created_at ";
+
+const RECORD_FROM: &str = "FROM records r LEFT JOIN cases c ON r.case_id = c.id ";
 
 #[tauri::command]
 pub fn get_records(
@@ -444,8 +685,9 @@ pub fn get_records(
             (false, false) => {
                 let total: i64 =
                     conn.query_row("SELECT COUNT(*) FROM records", [], |r| r.get(0))?;
-                let mut stmt =
-                    conn.prepare(&format!("{RECORD_SELECT_SQL} FROM records ORDER BY id DESC LIMIT ?1 OFFSET ?2"))?;
+                let mut stmt = conn.prepare(&format!(
+                    "{RECORD_SELECT_SQL} {RECORD_FROM} ORDER BY r.id DESC LIMIT ?1 OFFSET ?2"
+                ))?;
                 let rows = stmt.query_map(params![page_size, offset], map_record)?;
                 for row in rows {
                     records.push(row?);
@@ -459,7 +701,7 @@ pub fn get_records(
                     |r| r.get(0),
                 )?;
                 let mut stmt = conn.prepare(&format!(
-                    "{RECORD_SELECT_SQL} FROM records WHERE status = ?3 ORDER BY id DESC LIMIT ?1 OFFSET ?2"
+                    "{RECORD_SELECT_SQL} {RECORD_FROM} WHERE r.status = ?3 ORDER BY r.id DESC LIMIT ?1 OFFSET ?2"
                 ))?;
                 let rows = stmt.query_map(params![page_size, offset, status_filter], map_record)?;
                 for row in rows {
@@ -470,14 +712,15 @@ pub fn get_records(
             (true, false) => {
                 let pat = format!("%{}%", search);
                 let total: i64 = conn.query_row(
-                    "SELECT COUNT(*) FROM records WHERE record_id LIKE ?1 OR criminal_name LIKE ?1",
+                    "SELECT COUNT(*) FROM records r LEFT JOIN cases c ON r.case_id = c.id
+                     WHERE r.record_id LIKE ?1 OR r.criminal_name LIKE ?1 OR COALESCE(c.case_number,'') LIKE ?1",
                     params![pat],
                     |r| r.get(0),
                 )?;
                 let mut stmt = conn.prepare(&format!(
-                    "{RECORD_SELECT_SQL} FROM records
-                 WHERE record_id LIKE ?3 OR criminal_name LIKE ?3
-                 ORDER BY id DESC LIMIT ?1 OFFSET ?2"
+                    "{RECORD_SELECT_SQL} {RECORD_FROM}
+                 WHERE r.record_id LIKE ?3 OR r.criminal_name LIKE ?3 OR COALESCE(c.case_number,'') LIKE ?3
+                 ORDER BY r.id DESC LIMIT ?1 OFFSET ?2"
                 ))?;
                 let rows = stmt.query_map(params![page_size, offset, pat], map_record)?;
                 for row in rows {
@@ -488,14 +731,15 @@ pub fn get_records(
             (true, true) => {
                 let pat = format!("%{}%", search);
                 let total: i64 = conn.query_row(
-                    "SELECT COUNT(*) FROM records WHERE status = ?1 AND (record_id LIKE ?2 OR criminal_name LIKE ?2)",
+                    "SELECT COUNT(*) FROM records r LEFT JOIN cases c ON r.case_id = c.id
+                     WHERE r.status = ?1 AND (r.record_id LIKE ?2 OR r.criminal_name LIKE ?2 OR COALESCE(c.case_number,'') LIKE ?2)",
                     params![status_filter, pat],
                     |r| r.get(0),
                 )?;
                 let mut stmt = conn.prepare(&format!(
-                    "{RECORD_SELECT_SQL} FROM records
-                 WHERE status = ?3 AND (record_id LIKE ?4 OR criminal_name LIKE ?4)
-                 ORDER BY id DESC LIMIT ?1 OFFSET ?2"
+                    "{RECORD_SELECT_SQL} {RECORD_FROM}
+                 WHERE r.status = ?3 AND (r.record_id LIKE ?4 OR r.criminal_name LIKE ?4 OR COALESCE(c.case_number,'') LIKE ?4)
+                 ORDER BY r.id DESC LIMIT ?1 OFFSET ?2"
                 ))?;
                 let rows =
                     stmt.query_map(params![page_size, offset, status_filter, pat], map_record)?;
@@ -510,7 +754,7 @@ pub fn get_records(
 
 fn fetch_record(conn: &Connection, id: i64) -> SqlResult<Record> {
     conn.query_row(
-        &format!("{RECORD_SELECT_SQL} FROM records WHERE id = ?1"),
+        &format!("{RECORD_SELECT_SQL} {RECORD_FROM} WHERE r.id = ?1"),
         params![id],
         map_record,
     )
@@ -552,22 +796,369 @@ pub fn get_templates() -> Result<Vec<Template>, String> {
     with_db(|conn| {
         let mut stmt = conn.prepare(
             "SELECT id, name, COALESCE(category,''), COALESCE(content,''),
-                    COALESCE(created_at,'') FROM templates ORDER BY id",
+                    COALESCE(created_at,''), COALESCE(deleted_at,'')
+             FROM templates
+             WHERE deleted_at IS NULL
+             ORDER BY id",
         )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(Template {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                category: row.get(2)?,
-                content: row.get(3)?,
-                created_at: row.get(4)?,
-            })
-        })?;
+        let rows = stmt.query_map([], map_template_row)?;
         let mut v = Vec::new();
         for r in rows {
             v.push(r?);
         }
         Ok(v)
+    })
+}
+
+fn map_template_row(row: &rusqlite::Row) -> rusqlite::Result<Template> {
+    Ok(Template {
+        id: row.get(0)?,
+        name: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+        category: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+        content: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+        created_at: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+        deleted_at: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+    })
+}
+
+#[tauri::command]
+pub fn get_templates_by_page(
+    page: i64,
+    page_size: i64,
+    search: String,
+    include_disabled: bool,
+) -> Result<(Vec<Template>, i64), String> {
+    let search = search.trim().to_string();
+    with_db(|conn| {
+        let offset = page * page_size;
+        let has_search = !search.is_empty();
+        let pat = format!("%{}%", search);
+        let mut templates = Vec::new();
+
+        let total: i64 = if include_disabled {
+            if has_search {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM templates
+                     WHERE name LIKE ?1 OR category LIKE ?1 OR content LIKE ?1",
+                    params![pat],
+                    |r| r.get(0),
+                )?
+            } else {
+                conn.query_row("SELECT COUNT(*) FROM templates", [], |r| r.get(0))?
+            }
+        } else if has_search {
+            conn.query_row(
+                "SELECT COUNT(*) FROM templates
+                 WHERE deleted_at IS NULL AND (name LIKE ?1 OR category LIKE ?1 OR content LIKE ?1)",
+                params![pat],
+                |r| r.get(0),
+            )?
+        } else {
+            conn.query_row(
+                "SELECT COUNT(*) FROM templates WHERE deleted_at IS NULL",
+                [],
+                |r| r.get(0),
+            )?
+        };
+
+        if include_disabled {
+            if has_search {
+                let mut stmt = conn.prepare(
+                    "SELECT id, name, COALESCE(category,''), COALESCE(content,''),
+                            COALESCE(created_at,''), COALESCE(deleted_at,'')
+                     FROM templates
+                     WHERE name LIKE ?3 OR category LIKE ?3 OR content LIKE ?3
+                     ORDER BY id DESC LIMIT ?1 OFFSET ?2",
+                )?;
+                let rows = stmt.query_map(params![page_size, offset, pat], map_template_row)?;
+                for row in rows {
+                    templates.push(row?);
+                }
+            } else {
+                let mut stmt = conn.prepare(
+                    "SELECT id, name, COALESCE(category,''), COALESCE(content,''),
+                            COALESCE(created_at,''), COALESCE(deleted_at,'')
+                     FROM templates
+                     ORDER BY id DESC LIMIT ?1 OFFSET ?2",
+                )?;
+                let rows = stmt.query_map(params![page_size, offset], map_template_row)?;
+                for row in rows {
+                    templates.push(row?);
+                }
+            }
+        } else if has_search {
+            let mut stmt = conn.prepare(
+                "SELECT id, name, COALESCE(category,''), COALESCE(content,''),
+                        COALESCE(created_at,''), COALESCE(deleted_at,'')
+                 FROM templates
+                 WHERE deleted_at IS NULL AND (name LIKE ?3 OR category LIKE ?3 OR content LIKE ?3)
+                 ORDER BY id DESC LIMIT ?1 OFFSET ?2",
+            )?;
+            let rows = stmt.query_map(params![page_size, offset, pat], map_template_row)?;
+            for row in rows {
+                templates.push(row?);
+            }
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT id, name, COALESCE(category,''), COALESCE(content,''),
+                        COALESCE(created_at,''), COALESCE(deleted_at,'')
+                 FROM templates
+                 WHERE deleted_at IS NULL
+                 ORDER BY id DESC LIMIT ?1 OFFSET ?2",
+            )?;
+            let rows = stmt.query_map(params![page_size, offset], map_template_row)?;
+            for row in rows {
+                templates.push(row?);
+            }
+        }
+        Ok((templates, total))
+    })
+}
+
+#[tauri::command]
+pub fn get_template_by_id(id: i64) -> Result<Template, String> {
+    if id <= 0 {
+        return Err("无效模板 id".into());
+    }
+    let conn = db_conn()?;
+    conn.query_row(
+        "SELECT id, name, COALESCE(category,''), COALESCE(content,''),
+                COALESCE(created_at,''), COALESCE(deleted_at,'')
+         FROM templates WHERE id = ?1",
+        params![id],
+        map_template_row,
+    )
+    .map_err(|_| "模板不存在".to_string())
+}
+
+#[tauri::command]
+pub fn add_template(input: TemplateInput) -> Result<Template, String> {
+    let name = input.name.trim().to_string();
+    if name.is_empty() {
+        return Err("模板名称不能为空".into());
+    }
+    let conn = db_conn()?;
+    conn.execute(
+        "INSERT INTO templates (name, category, content, created_by, created_at, deleted_at)
+         VALUES (?1, ?2, ?3, 'system', datetime('now', 'localtime'), NULL)",
+        params![name, input.category.trim(), input.content],
+    )
+    .map_err(|e| e.to_string())?;
+    let id = conn.last_insert_rowid();
+    get_template_by_id(id)
+}
+
+#[tauri::command]
+pub fn update_template(t: Template) -> Result<(), String> {
+    if t.id <= 0 {
+        return Err("无效模板 id".into());
+    }
+    if t.name.trim().is_empty() {
+        return Err("模板名称不能为空".into());
+    }
+    with_db(|conn| {
+        let n = conn.execute(
+            "UPDATE templates
+             SET name = ?2, category = ?3, content = ?4
+             WHERE id = ?1",
+            params![t.id, t.name.trim(), t.category.trim(), t.content],
+        )?;
+        if n == 0 {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
+        Ok(())
+    })
+    .map_err(|_| "模板不存在".to_string())
+}
+
+#[tauri::command]
+pub fn disable_template(id: i64) -> Result<(), String> {
+    if id <= 0 {
+        return Err("无效模板 id".into());
+    }
+    with_db(|conn| {
+        let n = conn.execute(
+            "UPDATE templates
+             SET deleted_at = datetime('now', 'localtime')
+             WHERE id = ?1 AND deleted_at IS NULL",
+            params![id],
+        )?;
+        if n == 0 {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
+        Ok(())
+    })
+    .map_err(|_| "模板不存在或已停用".to_string())
+}
+
+fn csv_escape(value: &str) -> String {
+    if value.contains(',') || value.contains('"') || value.contains('\n') || value.contains('\r') {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
+#[tauri::command]
+pub fn export_records_csv(filter: ExportRecordFilter, file_path: String) -> Result<ExportResult, String> {
+    let file_path = file_path.trim().to_string();
+    if file_path.is_empty() {
+        return Err("导出路径不能为空".into());
+    }
+    let keyword = filter.keyword.trim().to_string();
+    let status = filter.status.trim().to_string();
+    let has_keyword = !keyword.is_empty();
+    let has_status = !status.is_empty();
+    let rows_data: Vec<Vec<String>> = with_db(|conn| {
+        let mut rows_data: Vec<Vec<String>> = Vec::new();
+        let base_select = "SELECT r.record_id,
+                                COALESCE(c.case_number,'') as case_number,
+                                COALESCE(cr.criminal_id,'') as criminal_code,
+                                COALESCE(r.criminal_name,'') as criminal_name,
+                                COALESCE(r.record_type,'') as record_type,
+                                COALESCE(r.status,'') as status,
+                                COALESCE(r.record_date,'') as record_date,
+                                COALESCE(r.record_location,'') as record_location,
+                                COALESCE(r.interrogator_id,'') as interrogator_id,
+                                COALESCE(r.recorder_id,'') as recorder_id,
+                                COALESCE(r.created_at,'') as created_at,
+                                COALESCE(r.reject_reason,'') as reject_reason
+                         FROM records r
+                         LEFT JOIN cases c ON r.case_id = c.id
+                         LEFT JOIN criminals cr ON r.criminal_id = cr.id";
+
+        match (has_keyword, has_status) {
+            (false, false) => {
+                let mut stmt = conn.prepare(&format!("{base_select} ORDER BY r.id DESC"))?;
+                let rows = stmt.query_map([], |row| {
+                    Ok(vec![
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, String>(11)?,
+                    ])
+                })?;
+                for row in rows {
+                    rows_data.push(row?);
+                }
+            }
+            (false, true) => {
+                let mut stmt = conn.prepare(&format!("{base_select} WHERE r.status = ?1 ORDER BY r.id DESC"))?;
+                let rows = stmt.query_map(params![status], |row| {
+                    Ok(vec![
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, String>(11)?,
+                    ])
+                })?;
+                for row in rows {
+                    rows_data.push(row?);
+                }
+            }
+            (true, false) => {
+                let pat = format!("%{}%", keyword);
+                let mut stmt = conn.prepare(
+                    &format!("{base_select} WHERE r.record_id LIKE ?1 OR r.criminal_name LIKE ?1 OR COALESCE(c.case_number,'') LIKE ?1 ORDER BY r.id DESC"),
+                )?;
+                let rows = stmt.query_map(params![pat], |row| {
+                    Ok(vec![
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, String>(11)?,
+                    ])
+                })?;
+                for row in rows {
+                    rows_data.push(row?);
+                }
+            }
+            (true, true) => {
+                let pat = format!("%{}%", keyword);
+                let mut stmt = conn.prepare(
+                    &format!("{base_select} WHERE r.status = ?1 AND (r.record_id LIKE ?2 OR r.criminal_name LIKE ?2 OR COALESCE(c.case_number,'') LIKE ?2) ORDER BY r.id DESC"),
+                )?;
+                let rows = stmt.query_map(params![status, pat], |row| {
+                    Ok(vec![
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, String>(11)?,
+                    ])
+                })?;
+                for row in rows {
+                    rows_data.push(row?);
+                }
+            }
+        }
+        Ok(rows_data)
+    })?;
+
+    let headers = [
+        "笔录编号(record_id)",
+        "案件案号(case_number)",
+        "服刑人员编号(criminal_code)",
+        "服刑人员姓名(criminal_name)",
+        "笔录类型(record_type)",
+        "状态(status)",
+        "谈话时间(record_date)",
+        "谈话地点(record_location)",
+        "谈话人(interrogator_id)",
+        "记录人(recorder_id)",
+        "创建时间(created_at)",
+        "驳回理由(reject_reason)",
+    ];
+
+    let mut lines = Vec::new();
+    lines.push(headers.join(","));
+    for row in &rows_data {
+        lines.push(row.iter().map(|x| csv_escape(x)).collect::<Vec<_>>().join(","));
+    }
+    let csv_text = lines.join("\n");
+    let mut bytes = vec![0xEF, 0xBB, 0xBF];
+    bytes.extend_from_slice(csv_text.as_bytes());
+
+    let path = std::path::Path::new(&file_path);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(path, bytes).map_err(|e| format!("写入导出文件失败: {}", e))?;
+
+    Ok(ExportResult {
+        file_path,
+        exported_count: rows_data.len() as i64,
     })
 }
 
@@ -593,6 +1184,8 @@ pub fn add_record(input: RecordInput) -> Result<Record, String> {
         return Err("服刑人员不存在或已删除".into());
     }
 
+    validate_case_ref(&conn, input.case_id)?;
+
     let criminal_name: String = conn
         .query_row(
             "SELECT COALESCE(name,'') FROM criminals WHERE id = ?1",
@@ -607,8 +1200,8 @@ pub fn add_record(input: RecordInput) -> Result<Record, String> {
                 record_id, record_type, criminal_id, criminal_name,
                 record_date, record_location, interrogator_id, recorder_id,
                 present_persons, content, content_encrypted,
-                signed_interrogator, signed_recorder, signed_subject, status)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,0,0,0,0,'Draft')",
+                signed_interrogator, signed_recorder, signed_subject, status, case_id)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,0,0,0,0,'Draft',?11)",
         params![
             record_id,
             rt,
@@ -620,6 +1213,7 @@ pub fn add_record(input: RecordInput) -> Result<Record, String> {
             input.recorder_id.trim(),
             input.present_persons.trim(),
             input.content,
+            input.case_id,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -663,6 +1257,8 @@ pub fn update_record(record: Record) -> Result<(), String> {
         return Err("服刑人员不存在或已删除".into());
     }
 
+    validate_case_ref(&conn, record.case_id)?;
+
     let criminal_name: String = conn
         .query_row(
             "SELECT COALESCE(name,'') FROM criminals WHERE id = ?1",
@@ -675,7 +1271,8 @@ pub fn update_record(record: Record) -> Result<(), String> {
         "UPDATE records SET
                 record_type = ?2, criminal_id = ?3, criminal_name = ?4,
                 record_date = ?5, record_location = ?6,
-                interrogator_id = ?7, recorder_id = ?8, present_persons = ?9, content = ?10
+                interrogator_id = ?7, recorder_id = ?8, present_persons = ?9, content = ?10,
+                case_id = ?11
              WHERE id = ?1",
         params![
             record.id,
@@ -688,7 +1285,203 @@ pub fn update_record(record: Record) -> Result<(), String> {
             record.recorder_id.trim(),
             record.present_persons.trim(),
             record.content,
+            record.case_id,
         ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ── 审批（阶段 2）──────────────────────────────────────────
+
+const LOG_ACTION_SUBMIT_PENDING: &str = "record_submit_pending";
+const LOG_ACTION_APPROVE: &str = "record_approve";
+const LOG_ACTION_REJECT: &str = "record_reject";
+
+fn log_audit(
+    conn: &Connection,
+    action: &str,
+    target_type: &str,
+    target_id: &str,
+    detail: &str,
+) -> SqlResult<()> {
+    conn.execute(
+        "INSERT INTO logs (user_id, action, target_type, target_id, detail) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params!["system", action, target_type, target_id, detail],
+    )?;
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+pub struct ApprovalSummary {
+    pub pending: i64,
+    pub approved_total: i64,
+    pub rejected_total: i64,
+}
+
+#[tauri::command]
+pub fn get_approval_summary() -> Result<ApprovalSummary, String> {
+    let conn = db_conn()?;
+    let pending: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM records WHERE status = 'Pending'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let approved_total: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM records WHERE status = 'Approved'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let rejected_total: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM records WHERE status = 'Rejected'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(ApprovalSummary {
+        pending,
+        approved_total,
+        rejected_total,
+    })
+}
+
+#[tauri::command]
+pub fn list_pending_records() -> Result<Vec<Record>, String> {
+    with_db(|conn| {
+        let mut stmt = conn.prepare(&format!(
+            "{RECORD_SELECT_SQL} {RECORD_FROM} WHERE r.status = 'Pending' ORDER BY r.id DESC"
+        ))?;
+        let rows = stmt.query_map([], map_record)?;
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row?);
+        }
+        Ok(records)
+    })
+}
+
+/// 草稿提交为待审批（校验与 `update_record` 一致，且要求正文非空）
+#[tauri::command]
+pub fn submit_record_for_approval(id: i64) -> Result<Record, String> {
+    if id <= 0 {
+        return Err("无效笔录 id".into());
+    }
+    let conn = db_conn()?;
+    let rec = fetch_record(&conn, id).map_err(|e| e.to_string())?;
+    if rec.status != "Draft" {
+        return Err("仅草稿可提交审批".into());
+    }
+    if rec.record_type.trim().is_empty() {
+        return Err("笔录类型不能为空".into());
+    }
+    if rec.criminal_id <= 0 {
+        return Err("请选择服刑人员".into());
+    }
+    if rec.content.trim().is_empty() {
+        return Err("正文不能为空，请填写后再提交审批".into());
+    }
+    let exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM criminals WHERE id = ?1)",
+            params![rec.criminal_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !exists {
+        return Err("服刑人员不存在或已删除".into());
+    }
+
+    let n = conn
+        .execute(
+            "UPDATE records SET status = 'Pending', reject_reason = '' WHERE id = ?1 AND status = 'Draft'",
+            params![id],
+        )
+        .map_err(|e| e.to_string())?;
+    if n == 0 {
+        return Err("提交失败：记录已不是草稿".into());
+    }
+    log_audit(
+        &conn,
+        LOG_ACTION_SUBMIT_PENDING,
+        "record",
+        rec.record_id.as_str(),
+        "",
+    )
+    .map_err(|e| e.to_string())?;
+    fetch_record(&conn, id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn approve_record(id: i64) -> Result<(), String> {
+    if id <= 0 {
+        return Err("无效笔录 id".into());
+    }
+    let conn = db_conn()?;
+    let record_id: String = conn
+        .query_row(
+            "SELECT COALESCE(record_id,'') FROM records WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        )
+        .map_err(|_| "笔录不存在".to_string())?;
+    let n = conn
+        .execute(
+            "UPDATE records SET status = 'Approved', reject_reason = '', approver1_result = 'Approved'
+             WHERE id = ?1 AND status = 'Pending'",
+            params![id],
+        )
+        .map_err(|e| e.to_string())?;
+    if n == 0 {
+        return Err("仅待审批记录可通过".into());
+    }
+    log_audit(
+        &conn,
+        LOG_ACTION_APPROVE,
+        "record",
+        record_id.as_str(),
+        "",
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn reject_record(id: i64, reason: String) -> Result<(), String> {
+    if id <= 0 {
+        return Err("无效笔录 id".into());
+    }
+    let reason = reason.trim().to_string();
+    if reason.is_empty() {
+        return Err("驳回理由不能为空".into());
+    }
+    let conn = db_conn()?;
+    let record_id: String = conn
+        .query_row(
+            "SELECT COALESCE(record_id,'') FROM records WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        )
+        .map_err(|_| "笔录不存在".to_string())?;
+    let n = conn
+        .execute(
+            "UPDATE records SET status = 'Rejected', reject_reason = ?2 WHERE id = ?1 AND status = 'Pending'",
+            params![id, reason],
+        )
+        .map_err(|e| e.to_string())?;
+    if n == 0 {
+        return Err("仅待审批记录可驳回".into());
+    }
+    log_audit(
+        &conn,
+        LOG_ACTION_REJECT,
+        "record",
+        record_id.as_str(),
+        reason.as_str(),
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -717,26 +1510,189 @@ fn map_record(row: &rusqlite::Row) -> rusqlite::Result<Record> {
         approver1_result: row.get(18)?,
         approver2_result: row.get(19)?,
         reject_reason: row.get(20)?,
-        created_at: row.get::<_, Option<String>>(21)?.unwrap_or_default(),
+        case_id: row.get::<_, Option<i64>>(21)?,
+        case_number: row.get::<_, Option<String>>(22)?.unwrap_or_default(),
+        created_at: row.get::<_, Option<String>>(23)?.unwrap_or_default(),
+    })
+}
+
+fn map_case_row(row: &rusqlite::Row) -> rusqlite::Result<Case> {
+    Ok(Case {
+        id: row.get(0)?,
+        case_number: row.get(1)?,
+        title: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+        status: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+        remark: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+        created_at: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+        updated_at: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
+    })
+}
+
+#[tauri::command]
+pub fn get_cases_by_page(
+    page: i64,
+    page_size: i64,
+    search: String,
+) -> Result<(Vec<Case>, i64), String> {
+    let search = search.trim().to_string();
+    with_db(|conn| {
+        let offset = page * page_size;
+        let total: i64 = if search.is_empty() {
+            conn.query_row("SELECT COUNT(*) FROM cases", [], |r| r.get(0))?
+        } else {
+            let pat = format!("%{}%", search);
+            conn.query_row(
+                "SELECT COUNT(*) FROM cases WHERE case_number LIKE ?1 OR title LIKE ?1 OR COALESCE(remark,'') LIKE ?1",
+                params![pat],
+                |r| r.get(0),
+            )?
+        };
+
+        let mut cases = Vec::new();
+        if search.is_empty() {
+            let mut stmt = conn.prepare(
+                "SELECT id, case_number, COALESCE(title,'') as title, COALESCE(status,'') as status,
+                        COALESCE(remark,'') as remark,
+                        COALESCE(created_at,'') as created_at, COALESCE(updated_at,'') as updated_at
+                 FROM cases ORDER BY id DESC LIMIT ?1 OFFSET ?2",
+            )?;
+            let rows = stmt.query_map(params![page_size, offset], map_case_row)?;
+            for row in rows {
+                cases.push(row?);
+            }
+        } else {
+            let pat = format!("%{}%", search);
+            let mut stmt = conn.prepare(
+                "SELECT id, case_number, COALESCE(title,'') as title, COALESCE(status,'') as status,
+                        COALESCE(remark,'') as remark,
+                        COALESCE(created_at,'') as created_at, COALESCE(updated_at,'') as updated_at
+                 FROM cases
+                 WHERE case_number LIKE ?3 OR title LIKE ?3 OR COALESCE(remark,'') LIKE ?3
+                 ORDER BY id DESC LIMIT ?1 OFFSET ?2",
+            )?;
+            let rows = stmt.query_map(params![page_size, offset, pat], map_case_row)?;
+            for row in rows {
+                cases.push(row?);
+            }
+        }
+
+        Ok((cases, total))
+    })
+}
+
+#[tauri::command]
+pub fn get_case_by_id(id: i64) -> Result<Case, String> {
+    if id <= 0 {
+        return Err("无效案件 id".into());
+    }
+    let conn = db_conn()?;
+    conn.query_row(
+        "SELECT id, case_number, COALESCE(title,'') as title, COALESCE(status,'') as status,
+                COALESCE(remark,'') as remark,
+                COALESCE(created_at,'') as created_at, COALESCE(updated_at,'') as updated_at
+         FROM cases WHERE id = ?1",
+        params![id],
+        map_case_row,
+    )
+    .map_err(|_| "案件不存在".into())
+}
+
+#[tauri::command]
+pub fn add_case(input: CaseInput) -> Result<Case, String> {
+    let num = input.case_number.trim().to_string();
+    if num.is_empty() {
+        return Err("案号不能为空".into());
+    }
+    let title = input.title.trim().to_string();
+    let status = if input.status.trim().is_empty() {
+        "open".to_string()
+    } else {
+        input.status.trim().to_string()
+    };
+    let remark = input.remark.trim().to_string();
+
+    let conn = db_conn()?;
+    conn.execute(
+        "INSERT INTO cases (case_number, title, status, remark)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![num, title, status, remark],
+    )
+    .map_err(|e| {
+        let msg = e.to_string();
+        if msg.contains("UNIQUE") {
+            "案号已存在".into()
+        } else {
+            msg
+        }
+    })?;
+
+    let new_id = conn.last_insert_rowid();
+    conn.query_row(
+        "SELECT id, case_number, COALESCE(title,'') as title, COALESCE(status,'') as status,
+                COALESCE(remark,'') as remark,
+                COALESCE(created_at,'') as created_at, COALESCE(updated_at,'') as updated_at
+         FROM cases WHERE id = ?1",
+        params![new_id],
+        map_case_row,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_case(c: Case) -> Result<(), String> {
+    if c.id <= 0 {
+        return Err("无效案件 id".into());
+    }
+    let num = c.case_number.trim().to_string();
+    if num.is_empty() {
+        return Err("案号不能为空".into());
+    }
+    let conn = db_conn()?;
+    let n = conn
+        .execute(
+            "UPDATE cases SET case_number=?2, title=?3, status=?4, remark=?5,
+                updated_at=datetime('now', 'localtime')
+             WHERE id=?1",
+            params![c.id, num, c.title.trim(), c.status.trim(), c.remark.trim()],
+        )
+        .map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("UNIQUE") {
+                "案号已存在".into()
+            } else {
+                msg
+            }
+        })?;
+    if n == 0 {
+        return Err("案件不存在".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn list_records_by_case(case_id: i64) -> Result<Vec<Record>, String> {
+    if case_id <= 0 {
+        return Err("无效案件 id".into());
+    }
+    with_db(|conn| {
+        let mut stmt = conn.prepare(&format!(
+            "{RECORD_SELECT_SQL} {RECORD_FROM} WHERE r.case_id = ?1 ORDER BY r.id DESC"
+        ))?;
+        let rows = stmt.query_map(params![case_id], map_record)?;
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row?);
+        }
+        Ok(records)
     })
 }
 
 #[tauri::command]
 pub fn get_recent_records(limit: i64) -> Result<Vec<Record>, String> {
     with_db(|conn| {
-        let mut stmt = conn.prepare(
-            "SELECT id, record_id, record_type, criminal_id, criminal_name,
-                    record_date, record_location, interrogator_id, recorder_id,
-                    present_persons, content, content_encrypted,
-                    signed_interrogator, signed_recorder, signed_subject,
-                    status,
-                    COALESCE(approver1_id,'') as approver1_id,
-                    COALESCE(approver2_id,'') as approver2_id,
-                    COALESCE(approver1_result,'') as approver1_result,
-                    COALESCE(approver2_result,'') as approver2_result,
-                    COALESCE(reject_reason,'') as reject_reason, created_at
-             FROM records ORDER BY id DESC LIMIT ?1",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "{RECORD_SELECT_SQL} {RECORD_FROM} ORDER BY r.id DESC LIMIT ?1",
+        ))?;
         let rows = stmt.query_map(params![limit], map_record)?;
         let mut records = Vec::new();
         for row in rows {
@@ -783,7 +1739,7 @@ pub fn get_dashboard_stats() -> Result<DashboardStats, String> {
             .unwrap_or(0);
 
         let total_cases: i64 = conn
-            .query_row("SELECT COUNT(*) FROM records", [], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM cases", [], |r| r.get(0))
             .unwrap_or(0);
 
         let month_new_criminals: i64 = conn
@@ -796,7 +1752,7 @@ pub fn get_dashboard_stats() -> Result<DashboardStats, String> {
 
         let month_new_cases: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM records WHERE date(created_at) >= ?1",
+                "SELECT COUNT(*) FROM cases WHERE date(created_at) >= ?1",
                 params![month_start],
                 |r| r.get(0),
             )

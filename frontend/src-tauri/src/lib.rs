@@ -43,6 +43,7 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            app.handle().plugin(tauri_plugin_dialog::init())?;
 
             Ok(())
         })
@@ -54,12 +55,32 @@ pub fn run() {
             db::get_criminals_by_page,
             db::add_criminal,
             db::update_criminal,
+            db::get_archive_criminals_by_page,
+            db::archive_criminal,
+            db::unarchive_criminal,
+            // 案件管理（阶段 3）
+            db::get_cases_by_page,
+            db::get_case_by_id,
+            db::add_case,
+            db::update_case,
+            db::list_records_by_case,
             // 笔录管理
             db::get_records,
             db::get_record_by_id,
             db::add_record,
             db::update_record,
+            db::submit_record_for_approval,
+            db::list_pending_records,
+            db::approve_record,
+            db::reject_record,
+            db::get_approval_summary,
             db::get_templates,
+            db::get_templates_by_page,
+            db::get_template_by_id,
+            db::add_template,
+            db::update_template,
+            db::disable_template,
+            db::export_records_csv,
             db::get_recent_records,
             // 仪表盘
             db::get_dashboard_stats,

@@ -1,13 +1,15 @@
 // RecordsPage.tsx — 笔录制作（阶段 1 MVP：对接 SQLite）
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Criminal, Record, RecordInput, Template } from '../api'
+import type { Case, Criminal, Record, RecordInput, Template } from '../api'
 import {
   addRecord,
   getRecordById,
   getRecordsByPage,
   getCriminalsByPage,
+  getCasesByPage,
   getTemplates,
   updateRecord,
+  submitRecordForApproval,
 } from '../api'
 import {
   PRISON_RECORD_LOCATION_OTHER,
@@ -79,9 +81,12 @@ export default function RecordsPage() {
     recorder_id: '',
     present_persons: '',
     content: '',
+    case_id: null,
   }))
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editingRecordId, setEditingRecordId] = useState('')
+  /** 当前弹层对应笔录在库中的状态（新建未落库时为空字符串） */
+  const [editingRecordStatus, setEditingRecordStatus] = useState('')
   const [detailLoading, setDetailLoading] = useState(false)
 
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -90,6 +95,8 @@ export default function RecordsPage() {
   const [pickerLoading, setPickerLoading] = useState(false)
 
   const [templates, setTemplates] = useState<Template[]>([])
+  const [caseOptions, setCaseOptions] = useState<Case[]>([])
+  const [detailCaseNumberDisplay, setDetailCaseNumberDisplay] = useState('')
   const [resolvedCriminalName, setResolvedCriminalName] = useState('')
   const [overwritePrompt, setOverwritePrompt] = useState<OverwritePrompt>(null)
   const contentTextareaRef = useRef<HTMLTextAreaElement>(null)
@@ -135,6 +142,23 @@ export default function RecordsPage() {
         if (!cancelled) setTemplates(list)
       } catch {
         if (!cancelled) setTemplates(fallbackTemplatesStub())
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [detailOpen])
+
+  /** 弹窗打开时拉取案件列表（笔录可选关联） */
+  useEffect(() => {
+    if (!detailOpen || !isTauri()) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [list] = await getCasesByPage(0, 500, '')
+        if (!cancelled) setCaseOptions(list)
+      } catch {
+        if (!cancelled) setCaseOptions([])
       }
     })()
     return () => {
@@ -289,6 +313,8 @@ export default function RecordsPage() {
     setResolvedCriminalName('')
     setEditingId(null)
     setEditingRecordId('')
+    setEditingRecordStatus('')
+    setDetailCaseNumberDisplay('')
     setDetailReadonly(false)
     const firstType = templates[0]?.name ?? FALLBACK_TEMPLATE_NAMES[0]
     const tpl = templates.find(t => t.name === firstType)
@@ -301,6 +327,7 @@ export default function RecordsPage() {
       recorder_id: '',
       present_persons: '',
       content: tpl?.content ?? '',
+      case_id: null,
     })
     setDetailOpen(true)
   }
@@ -314,7 +341,10 @@ export default function RecordsPage() {
       const r = await getRecordById(id)
       setEditingId(r.id)
       setEditingRecordId(r.record_id)
+      setEditingRecordStatus(r.status || '')
       setResolvedCriminalName(r.criminal_name || '')
+      setDetailCaseNumberDisplay(r.case_number ?? '')
+      const cid = r.case_id != null && r.case_id > 0 ? r.case_id : null
       setForm({
         record_type: r.record_type,
         criminal_id: r.criminal_id,
@@ -324,6 +354,7 @@ export default function RecordsPage() {
         recorder_id: r.recorder_id,
         present_persons: r.present_persons,
         content: r.content,
+        case_id: cid,
       })
     } catch (e) {
       alert(String(e))
@@ -332,6 +363,33 @@ export default function RecordsPage() {
       setDetailLoading(false)
     }
   }
+
+  const buildPersistRecord = (): Record => ({
+    id: editingId!,
+    record_id: editingRecordId,
+    record_type: form.record_type,
+    criminal_id: form.criminal_id,
+    criminal_name: '',
+    record_date: form.record_date,
+    record_location: form.record_location,
+    interrogator_id: form.interrogator_id,
+    recorder_id: form.recorder_id,
+    present_persons: form.present_persons,
+    content: form.content,
+    content_encrypted: false,
+    signed_interrogator: false,
+    signed_recorder: false,
+    signed_subject: false,
+    status: 'Draft',
+    approver1_id: '',
+    approver2_id: '',
+    approver1_result: '',
+    approver2_result: '',
+    reject_reason: '',
+    case_id: form.case_id != null && form.case_id > 0 ? form.case_id : null,
+    case_number: '',
+    created_at: '',
+  })
 
   const saveDetail = async () => {
     if (!isTauri()) return
@@ -347,31 +405,33 @@ export default function RecordsPage() {
       if (editingId == null) {
         await addRecord(form)
       } else {
-        await updateRecord({
-          id: editingId,
-          record_id: editingRecordId,
-          record_type: form.record_type,
-          criminal_id: form.criminal_id,
-          criminal_name: '',
-          record_date: form.record_date,
-          record_location: form.record_location,
-          interrogator_id: form.interrogator_id,
-          recorder_id: form.recorder_id,
-          present_persons: form.present_persons,
-          content: form.content,
-          content_encrypted: false,
-          signed_interrogator: false,
-          signed_recorder: false,
-          signed_subject: false,
-          status: 'Draft',
-          approver1_id: '',
-          approver2_id: '',
-          approver1_result: '',
-          approver2_result: '',
-          reject_reason: '',
-          created_at: '',
-        })
+        await updateRecord(buildPersistRecord())
       }
+      setDetailOpen(false)
+      await loadRecords()
+    } catch (e) {
+      alert(String(e))
+    }
+  }
+
+  const handleSubmitForApproval = async () => {
+    if (!isTauri() || editingId == null) return
+    if (editingRecordStatus !== 'Draft') return
+    if (!form.record_type.trim()) {
+      alert('请选择笔录类型')
+      return
+    }
+    if (!form.criminal_id) {
+      alert('请选择服刑人员')
+      return
+    }
+    if (!form.content.trim()) {
+      alert('正文不能为空，请填写后再提交审批')
+      return
+    }
+    try {
+      await updateRecord(buildPersistRecord())
+      await submitRecordForApproval(editingId)
       setDetailOpen(false)
       await loadRecords()
     } catch (e) {
@@ -399,6 +459,10 @@ export default function RecordsPage() {
 
   const toolbarDisabled = detailReadonly
   const toolbarTitle = '查看模式下不可用'
+
+  /** 仅新建或草稿可改关联案件（与后端「仅草稿可编辑」一致） */
+  const caseFieldEditable =
+    !detailReadonly && (editingId === null || editingRecordStatus === 'Draft')
 
   const templateListForSelect = templates.length > 0 ? templates : fallbackTemplatesStub()
   const showLegacyRecordType =
@@ -465,6 +529,7 @@ export default function RecordsPage() {
             <thead>
               <tr>
                 <th>编号</th>
+                <th>案号</th>
                 <th>服刑人员</th>
                 <th>笔录类型</th>
                 <th>谈话日期</th>
@@ -477,14 +542,14 @@ export default function RecordsPage() {
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
+                  <td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
                     加载中...
                   </td>
                 </tr>
               )}
               {!loading && records.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
+                  <td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
                     {!isTauri() ? '仅桌面端可查库' : '暂无数据'}
                   </td>
                 </tr>
@@ -493,6 +558,7 @@ export default function RecordsPage() {
                 records.map(r => (
                   <tr key={r.id}>
                     <td className="cell-mono">{r.record_id}</td>
+                    <td className="cell-mono">{r.case_number?.trim() ? r.case_number : '—'}</td>
                     <td>{r.criminal_name || '—'}</td>
                     <td style={{ color: 'var(--text-secondary)' }}>{r.record_type}</td>
                     <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{r.record_date || '—'}</td>
@@ -564,6 +630,12 @@ export default function RecordsPage() {
                 {!detailLoading && editingId != null && (
                   <div className="record-modal__meta">笔录编号：{editingRecordId}</div>
                 )}
+                {!detailLoading && editingId != null && editingRecordStatus && (
+                  <div className="record-modal__meta" style={{ marginTop: 4 }}>
+                    状态：
+                    <span style={{ color: statusColor(editingRecordStatus) }}>{statusLabel(editingRecordStatus)}</span>
+                  </div>
+                )}
                 {!detailReadonly && (
                   <div className="record-modal__hint" style={{ marginTop: 8 }}>
                     监狱执法谈话笔录：面向服刑人员，用语区别于公安机关讯问犯罪嫌疑人。
@@ -629,6 +701,37 @@ export default function RecordsPage() {
                           </button>
                         )}
                       </div>
+                      {caseFieldEditable ? (
+                        <label className="record-modal__field record-modal__field--full">
+                          <span>关联案件（可选）</span>
+                          <select
+                            className="glass-input glass-input--select"
+                            value={form.case_id != null && form.case_id > 0 ? String(form.case_id) : ''}
+                            onChange={e => {
+                              const v = e.target.value
+                              setForm(f => ({
+                                ...f,
+                                case_id: v === '' ? null : Number(v),
+                              }))
+                            }}
+                          >
+                            <option value="">不关联</option>
+                            {caseOptions.map(c => (
+                              <option key={c.id} value={String(c.id)}>
+                                {c.case_number}
+                                {c.title ? ` · ${c.title}` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : (
+                        <div className="record-modal__field record-modal__field--full">
+                          <span style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
+                            关联案件（案号）
+                          </span>
+                          <strong>{detailCaseNumberDisplay || '—'}</strong>
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div>
@@ -752,9 +855,16 @@ export default function RecordsPage() {
                     {detailReadonly ? '关闭' : '取消'}
                   </button>
                   {!detailReadonly && (
-                    <button type="button" className="glass-btn primary" onClick={() => saveDetail()}>
-                      保存
-                    </button>
+                    <>
+                      <button type="button" className="glass-btn primary" onClick={() => saveDetail()}>
+                        保存
+                      </button>
+                      {editingId != null && editingRecordStatus === 'Draft' && (
+                        <button type="button" className="glass-btn primary" onClick={() => handleSubmitForApproval()}>
+                          提交审批
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </>

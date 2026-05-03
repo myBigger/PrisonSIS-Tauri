@@ -53,6 +53,8 @@ export interface RecordInput {
   recorder_id: string
   present_persons: string
   content: string
+  /** 可选关联案件（后端校验 FK）；不传或 null 表示不关联 */
+  case_id?: number | null
 }
 
 export interface Record {
@@ -77,7 +79,28 @@ export interface Record {
   approver1_result: string
   approver2_result: string
   reject_reason: string
+  case_id?: number | null
+  case_number?: string
   created_at: string
+}
+
+/** 案件（与 SQLite `cases` 表一致） */
+export interface Case {
+  id: number
+  case_number: string
+  title: string
+  status: string
+  remark: string
+  created_at: string
+  updated_at: string
+}
+
+/** 新建案件 */
+export interface CaseInput {
+  case_number: string
+  title: string
+  status?: string
+  remark?: string
 }
 
 export interface DashboardStats {
@@ -109,4 +132,28 @@ export interface Template {
   category: string
   content: string
   created_at: string
+  deleted_at?: string
+}
+
+export interface TemplateInput {
+  name: string
+  category?: string
+  content?: string
+}
+
+export interface ExportRecordFilter {
+  keyword?: string
+  status?: string
+}
+
+export interface ExportResult {
+  file_path: string
+  exported_count: number
+}
+
+/** 审批中心统计（与 Rust `ApprovalSummary` 一致） */
+export interface ApprovalSummary {
+  pending: number
+  approved_total: number
+  rejected_total: number
 }
