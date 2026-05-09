@@ -1,7 +1,7 @@
 // ExportPage.tsx — 文档导出（阶段 4：CSV）
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { save } from '@tauri-apps/plugin-dialog'
-import { exportRecordsCsv } from '../api'
+import { exportRecordsCount, exportRecordsCsv, getCasesByPage, getCriminalsByPage } from '../api'
 import { formatInvokeError } from '../lib/invokeError'
 import { isTauriRuntime as isTauri } from '../lib/tauriEnv'
 
@@ -22,11 +22,67 @@ function nowStamp() {
 export default function ExportPage() {
   const [keyword, setKeyword] = useState('')
   const [status, setStatus] = useState('')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [criminalCode, setCriminalCode] = useState('')
+  const [caseNumber, setCaseNumber] = useState('')
+  const [criminalHints, setCriminalHints] = useState<Array<{ code: string; name: string }>>([])
+  const [caseHints, setCaseHints] = useState<Array<{ case_number: string; title: string }>>([])
   const [exporting, setExporting] = useState(false)
   const [resultInfo, setResultInfo] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const defaultName = useMemo(() => `records_export_${nowStamp()}.csv`, [])
+
+  useEffect(() => {
+    if (!isTauri() || !criminalCode.trim()) {
+      setCriminalHints([])
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [rows] = await getCriminalsByPage(0, 8, criminalCode.trim())
+        if (!cancelled) {
+          setCriminalHints(
+            rows
+              .map(r => ({ code: r.criminal_id, name: r.name }))
+              .filter(x => x.code.trim().length > 0)
+          )
+        }
+      } catch {
+        if (!cancelled) setCriminalHints([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [criminalCode])
+
+  useEffect(() => {
+    if (!isTauri() || !caseNumber.trim()) {
+      setCaseHints([])
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [rows] = await getCasesByPage(0, 8, caseNumber.trim())
+        if (!cancelled) {
+          setCaseHints(
+            rows
+              .map(r => ({ case_number: r.case_number, title: r.title }))
+              .filter(x => x.case_number.trim().length > 0)
+          )
+        }
+      } catch {
+        if (!cancelled) setCaseHints([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [caseNumber])
 
   const onExport = async () => {
     if (!isTauri()) return
@@ -34,6 +90,20 @@ export default function ExportPage() {
     setError(null)
     setResultInfo(null)
     try {
+      const filterPayload = {
+        keyword: keyword.trim(),
+        status: status.trim(),
+        start_date: startDate.trim(),
+        end_date: endDate.trim(),
+        criminal_code: criminalCode.trim(),
+        case_number: caseNumber.trim(),
+      }
+      const matchedCount = await exportRecordsCount(filterPayload)
+      setResultInfo(`当前筛选命中 ${matchedCount} 条记录`)
+      if (matchedCount <= 0) {
+        setError('当前筛选条件无匹配数据，请调整条件后再导出。')
+        return
+      }
       const path = await save({
         title: '选择导出位置（CSV）',
         defaultPath: defaultName,
@@ -44,10 +114,7 @@ export default function ExportPage() {
         return
       }
       const result = await exportRecordsCsv(
-        {
-          keyword: keyword.trim(),
-          status: status.trim(),
-        },
+        filterPayload,
         path
       )
       setResultInfo(`导出成功：${result.exported_count} 条，文件：${result.file_path}`)
@@ -68,12 +135,68 @@ export default function ExportPage() {
         </p>
       )}
 
-      <div className="glass-panel" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div
+        className="glass-panel"
+        style={{
+          padding: 20,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+          maxHeight: '46vh',
+          overflowY: 'auto',
+        }}
+      >
         <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>导出筛选</h2>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>关键字（编号 / 服刑人员 / 案号）</span>
           <input className="glass-input" value={keyword} onChange={e => setKeyword(e.target.value)} />
         </label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>开始日期（record_date）</span>
+            <input type="date" className="glass-input" value={startDate} onChange={e => setStartDate(e.target.value)} />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>结束日期（record_date）</span>
+            <input type="date" className="glass-input" value={endDate} onChange={e => setEndDate(e.target.value)} />
+          </label>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>服刑人员编号（精确）</span>
+            <input
+              className="glass-input"
+              value={criminalCode}
+              onChange={e => setCriminalCode(e.target.value)}
+              list="export-criminal-code-hints"
+              placeholder="输入后自动联想"
+            />
+            <datalist id="export-criminal-code-hints">
+              {criminalHints.map(x => (
+                <option key={`${x.code}-${x.name}`} value={x.code}>
+                  {x.name}
+                </option>
+              ))}
+            </datalist>
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>案件案号（精确）</span>
+            <input
+              className="glass-input"
+              value={caseNumber}
+              onChange={e => setCaseNumber(e.target.value)}
+              list="export-case-number-hints"
+              placeholder="输入后自动联想"
+            />
+            <datalist id="export-case-number-hints">
+              {caseHints.map(x => (
+                <option key={`${x.case_number}-${x.title}`} value={x.case_number}>
+                  {x.title}
+                </option>
+              ))}
+            </datalist>
+          </label>
+        </div>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>状态</span>
           <select className="glass-input glass-input--select" value={status} onChange={e => setStatus(e.target.value)}>
@@ -105,6 +228,10 @@ export default function ExportPage() {
           onClick={() => {
             setKeyword('')
             setStatus('')
+            setStartDate('')
+            setEndDate('')
+            setCriminalCode('')
+            setCaseNumber('')
             setResultInfo(null)
             setError(null)
           }}

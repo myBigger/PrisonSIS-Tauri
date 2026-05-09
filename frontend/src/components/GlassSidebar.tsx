@@ -9,7 +9,16 @@ interface NavItem {
   page: string
 }
 
+export function pageAllowed(page: string, role: string): boolean {
+  const r = role.trim()
+  if (page === 'users') return r === 'Admin'
+  if (page === 'backup') return r === 'Admin' || r === 'Approver'
+  if (page === 'logs') return r === 'Admin' || r === 'Auditor'
+  return true
+}
+
 const navData: NavItem[] = [
+  { group: '核心业务', icon: '🏠', name: '首页', page: 'home' },
   { group: '核心业务', icon: '👤', name: '罪犯信息', page: 'criminals' },
   { group: '核心业务', icon: '📝', name: '笔录制作', page: 'records' },
   { group: '核心业务', icon: '✅', name: '审批中心', page: 'approvals' },
@@ -45,13 +54,21 @@ export default function GlassSidebar({ currentPage, onNavigate, user, onLogout }
     <div className={`sidebar${collapsed ? ' collapsed' : ''}`}>
       {/* 品牌区 */}
       <div className="sidebar-brand">
-        <div className="sidebar-logo">笔</div>
-        {!collapsed && (
-          <div className="sidebar-brand-text">
-            <div className="title">监狱审讯笔录</div>
-            <div className="subtitle">PrisonSIS v1.0</div>
-          </div>
-        )}
+        <button
+          type="button"
+          className="sidebar-brand-clickable"
+          onClick={() => onNavigate('home')}
+          aria-label="返回首页"
+          title="返回首页"
+        >
+          <div className="sidebar-logo">笔</div>
+          {!collapsed && (
+            <div className="sidebar-brand-text">
+              <div className="title">监狱审讯笔录</div>
+              <div className="subtitle">PrisonSIS v1.0</div>
+            </div>
+          )}
+        </button>
         <button
           className="sidebar-collapse-btn"
           onClick={() => setCollapsed(!collapsed)}
@@ -68,6 +85,7 @@ export default function GlassSidebar({ currentPage, onNavigate, user, onLogout }
             {!collapsed && <div className="nav-group-label">{group}</div>}
             {navData
               .filter(n => n.group === group)
+              .filter(item => pageAllowed(item.page, user.role))
               .map(item => (
                 <div
                   key={item.page}

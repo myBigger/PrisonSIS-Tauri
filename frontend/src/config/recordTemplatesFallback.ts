@@ -15,6 +15,8 @@ export function fallbackTemplatesStub(): Template[] {
     name,
     category: `RT-0${i + 1}`,
     content: '',
+    template_kind: 'free_text',
+    guide_schema_json: '',
     created_at: '',
   }))
 }

@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS users (
     position TEXT,
     phone TEXT,
     enabled INTEGER DEFAULT 1,
-    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+    deleted_at TEXT
 );
 
 -- 服刑人员表
@@ -97,6 +98,8 @@ CREATE TABLE IF NOT EXISTS templates (
     name TEXT NOT NULL,
     category TEXT,
     content TEXT,
+    template_kind TEXT NOT NULL DEFAULT 'free_text',
+    guide_schema_json TEXT,
     created_by TEXT,
     created_at TEXT DEFAULT (datetime('now', 'localtime')),
     deleted_at TEXT
@@ -151,9 +154,23 @@ VALUES (
     1
 );
 
+-- 插入审计员用户 (密码: 123456)
+INSERT OR IGNORE INTO users (user_id, username, password_hash, real_name, role, department, position, enabled)
+VALUES (
+    'U003',
+    'auditor',
+    '6ff59634a0f44f979afb161453a44100',
+    '审计员',
+    'Auditor',
+    '纪检审计科',
+    '审计员',
+    1
+);
+
 -- 已有库升级：覆盖错误/过期的密码哈希（每次启动执行）
 UPDATE users SET password_hash = '3578e7a11fad49d8381dc4251900405f' WHERE username = 'admin' AND user_id = 'U001';
 UPDATE users SET password_hash = '6ff59634a0f44f979afb161453a44100' WHERE username = 'operator' AND user_id = 'U002';
+UPDATE users SET password_hash = '6ff59634a0f44f979afb161453a44100' WHERE username = 'auditor' AND user_id = 'U003';
 
 -- 插入测试服刑人员数据
 INSERT OR IGNORE INTO criminals (criminal_id, name, gender, ethnicity, birth_date, id_card_number, native_place, education, crime, sentence_years, sentence_months, entry_date, district, cell, crime_type, manage_level)

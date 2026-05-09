@@ -160,7 +160,7 @@ export default function ArchivePage() {
                 <th>编号</th>
                 <th>姓名</th>
                 <th>罪名</th>
-                <th>入狱日期</th>
+                <th>入监日期</th>
                 <th>状态</th>
                 <th>操作</th>
               </tr>

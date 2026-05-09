@@ -12,6 +12,43 @@ export interface User {
   enabled: boolean
 }
 
+/** 用户管理列表行（含软删字段，与 Rust `ManagedUserRow` 一致） */
+export interface ManagedUserRow {
+  id: number
+  userId: string
+  username: string
+  realName: string
+  role: string
+  department: string
+  position: string
+  phone: string
+  enabled: boolean
+  createdAt: string
+  deletedAt?: string | null
+}
+
+export interface UserCreateInput {
+  userId: string
+  username: string
+  realName: string
+  role: string
+  department?: string
+  position?: string
+  phone?: string
+  password: string
+}
+
+export interface UserUpdateInput {
+  id: number
+  userId: string
+  username: string
+  realName: string
+  role: string
+  department?: string
+  position?: string
+  phone?: string
+}
+
 export interface Criminal {
   id: number
   criminal_id: string
@@ -42,6 +79,9 @@ export interface Criminal {
   contact_phone: string
   created_at: string
 }
+
+/** 新增服刑人员输入（与 Rust `CriminalCreateInput` 对齐，不含 id/created_at） */
+export type CriminalCreateInput = Omit<Criminal, 'id' | 'created_at'>
 
 /** 新建笔录（由后端生成 record_id，默认草稿） */
 export interface RecordInput {
@@ -108,10 +148,26 @@ export interface DashboardStats {
   pending_approvals: number
   total_criminals: number
   total_cases: number
+  closed_cases: number
+  active_cases: number
   yesterday_delta: number
   expired_count: number
   month_new_criminals: number
   month_new_cases: number
+  month_records: number
+  approval_rate: number
+  avg_approval_hours: number
+  archive_rate: number
+  monthly_trends: Array<{
+    month: string
+    records: number
+    criminals: number
+  }>
+  crime_distribution: Array<{
+    label: string
+    count: number
+    percent: number
+  }>
 }
 
 export interface LoginResult {
@@ -131,6 +187,8 @@ export interface Template {
   name: string
   category: string
   content: string
+  template_kind: 'free_text' | 'guided'
+  guide_schema_json: string
   created_at: string
   deleted_at?: string
 }
@@ -139,16 +197,33 @@ export interface TemplateInput {
   name: string
   category?: string
   content?: string
+  template_kind?: 'free_text' | 'guided'
+  guide_schema_json?: string
 }
 
 export interface ExportRecordFilter {
   keyword?: string
   status?: string
+  start_date?: string
+  end_date?: string
+  criminal_code?: string
+  case_number?: string
 }
 
 export interface ExportResult {
   file_path: string
   exported_count: number
+}
+
+export interface AuditLog {
+  id: number
+  user_id: string
+  action: string
+  target_type: string
+  target_id: string
+  detail: string
+  ip_address: string
+  created_at: string
 }
 
 /** 审批中心统计（与 Rust `ApprovalSummary` 一致） */

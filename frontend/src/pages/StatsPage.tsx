@@ -1,14 +1,33 @@
 // StatsPage.tsx — 统计分析页面
-import React from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { getDashboardStats } from '../api'
+import type { DashboardStats } from '../api'
+import { isTauriRuntime as isTauri } from '../lib/tauriEnv'
 
-const mockData = {
-  monthly: [
-    { month: '1月', records: 42, criminals: 38 },
-    { month: '2月', records: 55, criminals: 45 },
-    { month: '3月', records: 48, criminals: 41 },
-    { month: '4月', records: 63, criminals: 52 },
+const MOCK_STATS: DashboardStats = {
+  today_records: 3,
+  pending_approvals: 12,
+  total_criminals: 248,
+  total_cases: 56,
+  closed_cases: 18,
+  active_cases: 38,
+  yesterday_delta: 1,
+  expired_count: 3,
+  month_new_criminals: 7,
+  month_new_cases: 3,
+  month_records: 63,
+  approval_rate: 94.2,
+  avg_approval_hours: 2.3,
+  archive_rate: 12.4,
+  monthly_trends: [
+    { month: '2026-01', records: 42, criminals: 38 },
+    { month: '2026-02', records: 55, criminals: 45 },
+    { month: '2026-03', records: 48, criminals: 41 },
+    { month: '2026-04', records: 63, criminals: 52 },
+    { month: '2026-05', records: 59, criminals: 49 },
+    { month: '2026-06', records: 66, criminals: 55 },
   ],
-  byType: [
+  crime_distribution: [
     { label: '盗窃罪', count: 86, percent: 34 },
     { label: '故意伤害', count: 45, percent: 18 },
     { label: '诈骗罪', count: 38, percent: 15 },
@@ -18,17 +37,20 @@ const mockData = {
   ],
 }
 
-function BarChart({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
+function BarChart({ label, value, max, color, suffix = '' }: { label: string; value: number; max: number; color: string; suffix?: string }) {
+  const width = max > 0 ? `${Math.max((value / max) * 100, 2)}%` : '0%'
   return (
     <div style={{ marginBottom: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
         <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{label}</span>
-        <span style={{ color: 'var(--text-primary)', fontSize: 13 }}>{value}</span>
+        <span style={{ color: 'var(--text-primary)', fontSize: 13 }}>{value}{suffix}</span>
       </div>
       <div style={{ height: 8, background: 'rgba(255,255,255,0.06)', borderRadius: 4, overflow: 'hidden' }}>
         <div style={{
-          height: '100%', width: `${(value / max) * 100}%`,
-          background: color, borderRadius: 4,
+          height: '100%',
+          width,
+          background: color,
+          borderRadius: 4,
           transition: 'width 0.6s ease',
         }} />
       </div>
@@ -37,18 +59,43 @@ function BarChart({ label, value, max, color }: { label: string; value: number; 
 }
 
 export default function StatsPage() {
-  const maxRecords = Math.max(...mockData.monthly.map(m => m.records))
+  const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    async function loadStats() {
+      try {
+        if (isTauri()) {
+          const data = await getDashboardStats()
+          setStats(data)
+        } else {
+          setStats(MOCK_STATS)
+        }
+      } catch (e) {
+        setError(String(e))
+        setStats(MOCK_STATS)
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadStats()
+  }, [])
+
+  const monthly = stats?.monthly_trends ?? []
+  const byType = stats?.crime_distribution ?? []
+  const maxRecords = useMemo(() => Math.max(1, ...monthly.map(m => m.records)), [monthly])
+  const maxCrime = useMemo(() => Math.max(1, ...byType.map(m => m.count)), [byType])
 
   return (
     <div className="page">
       <h1 className="page-title">统计分析</h1>
+      {error && <p className="page-subtitle" style={{ color: 'var(--accent-secondary)' }}>统计加载失败，已显示降级数据：{error}</p>}
 
-      {/* 月度趋势 */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        {/* 月度笔录趋势 */}
         <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', padding: 20 }}>
-          <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 20 }}>月度笔录趋势</h2>
-          {mockData.monthly.map(m => (
+          <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 20 }}>月度笔录趋势（自然月）</h2>
+          {(loading ? MOCK_STATS.monthly_trends : monthly).map(m => (
             <div key={m.month} style={{ marginBottom: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
                 <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{m.month}</span>
@@ -56,7 +103,8 @@ export default function StatsPage() {
               </div>
               <div style={{ height: 6, background: 'rgba(255,255,255,0.05)', borderRadius: 3 }}>
                 <div style={{
-                  height: '100%', width: `${(m.records / maxRecords) * 100}%`,
+                  height: '100%',
+                  width: `${(m.records / maxRecords) * 100}%`,
                   background: 'linear-gradient(90deg, rgba(0,212,170,0.4), var(--accent-primary))',
                   borderRadius: 3,
                 }} />
@@ -65,24 +113,22 @@ export default function StatsPage() {
           ))}
         </div>
 
-        {/* 罪名分布 */}
         <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', padding: 20 }}>
-          <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 20 }}>罪名分布</h2>
-          {mockData.byType.map((item, i) => {
+          <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 20 }}>罪名分布（默认含历史）</h2>
+          {(loading ? MOCK_STATS.crime_distribution : byType).map((item, i) => {
             const colors = ['var(--accent-primary)', '#67E8F9', '#F59E0B', '#8B5CF6', '#EF4444', 'var(--text-secondary)']
-            return <BarChart key={item.label} label={item.label} value={item.count} max={100} color={colors[i]} />
+            return <BarChart key={item.label} label={item.label} value={item.count} max={maxCrime} color={colors[i % colors.length]} />
           })}
         </div>
       </div>
 
-      {/* 综合统计 */}
       <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
         {[
-          { label: '本月笔录', value: '63', icon: '📝', accent: 'var(--accent-primary)' },
-          { label: '本月新增人员', value: '52', icon: '👤', accent: '#67E8F9' },
-          { label: '审批通过率', value: '94.2%', icon: '✅', accent: 'var(--status-online)' },
-          { label: '平均审批时长', value: '2.3h', icon: '⏱', accent: 'var(--accent-secondary)' },
-          { label: '归档率', value: '87.6%', icon: '🗄', accent: 'var(--accent-purple)' },
+          { label: '本月笔录', value: loading ? '—' : String(stats?.month_records ?? 0), icon: '📝', accent: 'var(--accent-primary)' },
+          { label: '本月新增人员', value: loading ? '—' : String(stats?.month_new_criminals ?? 0), icon: '👤', accent: '#67E8F9' },
+          { label: '审批通过率', value: loading ? '—' : `${(stats?.approval_rate ?? 0).toFixed(1)}%`, icon: '✅', accent: 'var(--status-online)' },
+          { label: '平均审批时长', value: loading ? '—' : `${(stats?.avg_approval_hours ?? 0).toFixed(1)}h`, icon: '⏱', accent: 'var(--accent-secondary)' },
+          { label: '归档率', value: loading ? '—' : `${(stats?.archive_rate ?? 0).toFixed(1)}%`, icon: '🗄', accent: 'var(--accent-purple)' },
         ].map(s => (
           <div key={s.label} className="glass-card">
             <div className="card-icon" style={{ background: s.accent + '15', border: `1px solid ${s.accent}30` }}>

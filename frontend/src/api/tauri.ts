@@ -2,7 +2,11 @@
 import { invoke } from '@tauri-apps/api/core'
 import type {
   User,
+  ManagedUserRow,
+  UserCreateInput,
+  UserUpdateInput,
   Criminal,
+  CriminalCreateInput,
   Case,
   CaseInput,
   Record,
@@ -13,8 +17,32 @@ import type {
   TemplateInput,
   ExportRecordFilter,
   ExportResult,
+  AuditLog,
   ApprovalSummary,
 } from './types'
+
+function getCurrentAuth() {
+  try {
+    const raw = localStorage.getItem('prisonsis_user')
+    if (!raw) return { userRole: '', userId: '' }
+    const user = JSON.parse(raw) as { role?: string; user_id?: string }
+    return { userRole: user.role ?? '', userId: user.user_id ?? '' }
+  } catch {
+    return { userRole: '', userId: '' }
+  }
+}
+
+/** 与 `#[tauri::command(rename_all = "snake_case")]` 的日志类 command 对齐 */
+function getCurrentAuthSnake() {
+  try {
+    const raw = localStorage.getItem('prisonsis_user')
+    if (!raw) return { user_role: '', user_id: '' }
+    const user = JSON.parse(raw) as { role?: string; user_id?: string }
+    return { user_role: user.role ?? '', user_id: user.user_id ?? '' }
+  } catch {
+    return { user_role: '', user_id: '' }
+  }
+}
 
 // ── 认证 ────────────────────────────────────────────────
 export async function login(username: string, password: string): Promise<LoginResult> {
@@ -29,16 +57,20 @@ export async function getCriminals(): Promise<Criminal[]> {
 export async function getCriminalsByPage(
   page: number,
   pageSize: number,
-  search: string = ''
+  search: string = '',
+  statusFilter: '' | 'active' | 'archived' = '',
+  typeFilter: string = ''
 ): Promise<[Criminal[], number]> {
   return invoke<[Criminal[], number]>('get_criminals_by_page', {
     page,
     pageSize,
     search,
+    statusFilter,
+    typeFilter,
   })
 }
 
-export async function addCriminal(criminal: Omit<Criminal, 'id' | 'created_at'>): Promise<number> {
+export async function addCriminal(criminal: CriminalCreateInput): Promise<number> {
   return invoke<number>('add_criminal', { c: criminal })
 }
 
@@ -122,23 +154,23 @@ export async function updateRecord(record: Record): Promise<void> {
 }
 
 export async function submitRecordForApproval(id: number): Promise<Record> {
-  return invoke<Record>('submit_record_for_approval', { id })
+  return invoke<Record>('submit_record_for_approval', { id, ...getCurrentAuth() })
 }
 
 export async function listPendingRecords(): Promise<Record[]> {
-  return invoke<Record[]>('list_pending_records')
+  return invoke<Record[]>('list_pending_records', getCurrentAuth())
 }
 
 export async function approveRecord(id: number): Promise<void> {
-  return invoke<void>('approve_record', { id })
+  return invoke<void>('approve_record', { id, ...getCurrentAuth() })
 }
 
 export async function rejectRecord(id: number, reason: string): Promise<void> {
-  return invoke<void>('reject_record', { id, reason })
+  return invoke<void>('reject_record', { id, reason, ...getCurrentAuth() })
 }
 
 export async function getApprovalSummary(): Promise<ApprovalSummary> {
-  return invoke<ApprovalSummary>('get_approval_summary')
+  return invoke<ApprovalSummary>('get_approval_summary', getCurrentAuth())
 }
 
 export async function getRecentRecords(limit: number = 10): Promise<Record[]> {
@@ -179,7 +211,125 @@ export async function exportRecordsCsv(
   filter: ExportRecordFilter,
   filePath: string
 ): Promise<ExportResult> {
-  return invoke<ExportResult>('export_records_csv', { filter, filePath })
+  return invoke<ExportResult>('export_records_csv', { filter, filePath, ...getCurrentAuth() })
+}
+
+export async function exportRecordsCount(filter: ExportRecordFilter): Promise<number> {
+  return invoke<number>('export_records_count', { filter, ...getCurrentAuth() })
+}
+
+export async function getLogsByPage(
+  page: number,
+  pageSize: number,
+  search: string = '',
+  startDate: string = '',
+  endDate: string = ''
+): Promise<[AuditLog[], number]> {
+  return invoke<[AuditLog[], number]>('get_logs_by_page', {
+    page,
+    page_size: pageSize,
+    search,
+    start_date: startDate,
+    end_date: endDate,
+    ...getCurrentAuthSnake(),
+  })
+}
+
+export async function exportLogsCsv(
+  search: string,
+  startDate: string,
+  endDate: string,
+  filePath: string
+): Promise<ExportResult> {
+  return invoke<ExportResult>('export_logs_csv', {
+    search,
+    start_date: startDate,
+    end_date: endDate,
+    file_path: filePath,
+    ...getCurrentAuthSnake(),
+  })
+}
+
+export async function clearLogs(): Promise<number> {
+  return invoke<number>('clear_logs', { ...getCurrentAuth() })
+}
+
+// ── 用户管理与备份（阶段 5）──────────────────────────────
+export async function suggestNextUserId(): Promise<string> {
+  return invoke<string>('suggest_next_user_id', { ...getCurrentAuth() })
+}
+
+export async function getUsersByPage(
+  page: number,
+  pageSize: number,
+  search: string,
+  includeDeleted: boolean
+): Promise<[ManagedUserRow[], number]> {
+  return invoke<[ManagedUserRow[], number]>('get_users_by_page', {
+    page,
+    pageSize,
+    search,
+    includeDeleted,
+    ...getCurrentAuth(),
+  })
+}
+
+export async function addUser(input: UserCreateInput, privilegedElevated: boolean): Promise<number> {
+  return invoke<number>('add_user', {
+    input,
+    privilegedElevated,
+    ...getCurrentAuth(),
+  })
+}
+
+export async function updateUser(input: UserUpdateInput, privilegedRoleEdit: boolean): Promise<void> {
+  return invoke<void>('update_user', {
+    input,
+    privilegedRoleEdit,
+    ...getCurrentAuth(),
+  })
+}
+
+export async function softDeleteUser(id: number): Promise<void> {
+  return invoke<void>('soft_delete_user', { id, ...getCurrentAuth() })
+}
+
+export async function restoreSoftDeletedUser(id: number): Promise<void> {
+  return invoke<void>('restore_soft_deleted_user', { id, ...getCurrentAuth() })
+}
+
+export async function setUserEnabled(id: number, enabled: boolean): Promise<void> {
+  return invoke<void>('set_user_enabled', { id, enabled, ...getCurrentAuth() })
+}
+
+export async function resetPasswordAdmin(targetId: number, newPassword: string): Promise<void> {
+  return invoke<void>('reset_password_admin', {
+    targetId,
+    newPassword,
+    ...getCurrentAuth(),
+  })
+}
+
+export async function changeOwnPassword(oldPassword: string, newPassword: string): Promise<void> {
+  return invoke<void>('change_own_password', {
+    oldPassword,
+    newPassword,
+    ...getCurrentAuth(),
+  })
+}
+
+export async function exportDatabaseBackup(destPath: string): Promise<string> {
+  return invoke<string>('export_database_backup', {
+    destPath,
+    ...getCurrentAuth(),
+  })
+}
+
+export async function restoreDatabaseBackup(backupPath: string): Promise<void> {
+  return invoke<void>('restore_database_backup', {
+    backupPath,
+    ...getCurrentAuth(),
+  })
 }
 
 // ── 仪表盘 ──────────────────────────────────────────────

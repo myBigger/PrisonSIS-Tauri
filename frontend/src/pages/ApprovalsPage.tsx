@@ -1,16 +1,15 @@
 // ApprovalsPage.tsx — 审批中心（阶段 2：对接 SQLite）
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Record } from '../api'
 import {
   approveRecord,
   getApprovalSummary,
-  getRecordById,
   listPendingRecords,
   rejectRecord,
 } from '../api'
 import { formatInvokeError } from '../lib/invokeError'
 import { isTauriRuntime as isTauri } from '../lib/tauriEnv'
-import { dbDateTimeToLocalValue } from '../lib/recordFormUtils'
+import RecordViewModal from '../components/RecordViewModal'
 
 const statusColor = (s: string) => {
   if (s === 'Approved') return 'var(--status-online)'
@@ -33,8 +32,11 @@ export default function ApprovalsPage() {
   const [rejectReason, setRejectReason] = useState('')
 
   const [viewOpen, setViewOpen] = useState(false)
-  const [viewRecord, setViewRecord] = useState<Record | null>(null)
-  const [viewLoading, setViewLoading] = useState(false)
+  const [viewRecordId, setViewRecordId] = useState<number | null>(null)
+
+  /** 与 LogsPage 相同：合并并发 load，减轻 StrictMode 双次 effect */
+  const loadAllInflightRef = useRef<{ key: string; promise: Promise<void> } | null>(null)
+  const LOAD_ALL_KEY = 'approvals-load'
 
   const loadAll = useCallback(async () => {
     if (!isTauri()) {
@@ -43,23 +45,41 @@ export default function ApprovalsPage() {
       setLoading(false)
       return
     }
-    setError(null)
-    setLoading(true)
+    const inflight = loadAllInflightRef.current
+    if (inflight?.key === LOAD_ALL_KEY) {
+      await inflight.promise
+      return
+    }
+    const promise = (async () => {
+      setError(null)
+      setLoading(true)
+      try {
+        const [s, list] = await Promise.all([getApprovalSummary(), listPendingRecords()])
+        setSummary(s)
+        setPendingList(list)
+      } catch (e) {
+        setError(formatInvokeError(e))
+        setSummary(null)
+        setPendingList([])
+      } finally {
+        setLoading(false)
+      }
+    })()
+    loadAllInflightRef.current = { key: LOAD_ALL_KEY, promise }
     try {
-      const [s, list] = await Promise.all([getApprovalSummary(), listPendingRecords()])
-      setSummary(s)
-      setPendingList(list)
-    } catch (e) {
-      setError(formatInvokeError(e))
-      setSummary(null)
-      setPendingList([])
+      await promise
     } finally {
-      setLoading(false)
+      if (loadAllInflightRef.current?.promise === promise) {
+        loadAllInflightRef.current = null
+      }
     }
   }, [])
 
   useEffect(() => {
-    void loadAll()
+    const id = window.setTimeout(() => {
+      void loadAll()
+    }, 0)
+    return () => window.clearTimeout(id)
   }, [loadAll])
 
   const openReject = (id: number) => {
@@ -103,18 +123,8 @@ export default function ApprovalsPage() {
 
   const openView = async (id: number) => {
     if (!isTauri()) return
+    setViewRecordId(id)
     setViewOpen(true)
-    setViewLoading(true)
-    setViewRecord(null)
-    try {
-      const r = await getRecordById(id)
-      setViewRecord(r)
-    } catch (e) {
-      alert(formatInvokeError(e))
-      setViewOpen(false)
-    } finally {
-      setViewLoading(false)
-    }
   }
 
   const pending = pendingList
@@ -273,72 +283,17 @@ export default function ApprovalsPage() {
         </div>
       )}
 
-      {viewOpen && (
-        <div
-          className="record-modal-backdrop"
-          role="presentation"
-          style={{ zIndex: 2400 }}
-          onMouseDown={() => setViewOpen(false)}
-        >
-          <div className="record-modal" onMouseDown={e => e.stopPropagation()}>
-            <div className="record-modal__header">
-              <div className="record-modal__title-wrap">
-                <h2>查看笔录</h2>
-                {viewRecord && <div className="record-modal__meta">编号：{viewRecord.record_id}</div>}
-              </div>
-              <button
-                type="button"
-                className="record-modal__close"
-                aria-label="关闭"
-                onClick={() => setViewOpen(false)}
-              >
-                ×
-              </button>
-            </div>
-            {viewLoading || !viewRecord ? (
-              <div className="record-modal__body">
-                <p style={{ color: 'var(--text-muted)' }}>加载中…</p>
-              </div>
-            ) : (
-              <div className="record-modal__body" style={{ maxHeight: '70vh', overflow: 'auto' }}>
-                <div className="record-modal__section-title">基本信息</div>
-                <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 8px' }}>
-                  服刑人员：{viewRecord.criminal_name || '—'} · 类型：{viewRecord.record_type}
-                </p>
-                <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 8px' }}>
-                  谈话时间：{dbDateTimeToLocalValue(viewRecord.record_date) || '—'} · 地点：{viewRecord.record_location || '—'}
-                </p>
-                <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 8px' }}>
-                  关联案件（案号）：{viewRecord.case_number?.trim() ? viewRecord.case_number : '—'}
-                </p>
-                <div className="record-modal__section-title" style={{ marginTop: 16 }}>
-                  正文
-                </div>
-                <pre
-                  style={{
-                    whiteSpace: 'pre-wrap',
-                    fontFamily: 'inherit',
-                    fontSize: 13,
-                    color: 'var(--text-primary)',
-                    margin: 0,
-                    padding: 12,
-                    background: 'rgba(0,0,0,.2)',
-                    borderRadius: 8,
-                    border: '1px solid var(--glass-border)',
-                  }}
-                >
-                  {viewRecord.content || '（空）'}
-                </pre>
-              </div>
-            )}
-            <div className="record-modal__footer">
-              <button type="button" className="glass-btn" onClick={() => setViewOpen(false)}>
-                关闭
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <RecordViewModal
+        open={viewOpen}
+        recordId={viewRecordId ?? undefined}
+        showApprovalInfo
+        showRejectReason
+        onClose={() => {
+          setViewOpen(false)
+          setViewRecordId(null)
+        }}
+        zIndex={2400}
+      />
     </div>
   )
 }

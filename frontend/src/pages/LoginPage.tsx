@@ -3,7 +3,7 @@ import { useState, type FormEvent } from 'react'
 import { login } from '../api'
 
 interface LoginPageProps {
-  onLoginSuccess: (user: { username: string; real_name: string; role: string }) => void
+  onLoginSuccess: (user: { user_id: string; username: string; real_name: string; role: string }) => void
 }
 
 // 检测是否运行在 Tauri 环境
@@ -24,6 +24,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
       if (!isTauri()) {
         // Web 预览模式：直接登录
         onLoginSuccess({
+          user_id: 'U001',
           username: username || 'admin',
           real_name: '管理员',
           role: 'Admin',
@@ -34,6 +35,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
       const result = await login(username, password)
       if (result.success && result.user) {
         onLoginSuccess({
+          user_id: result.user.user_id,
           username: result.user.username,
           real_name: result.user.real_name,
           role: result.user.role,

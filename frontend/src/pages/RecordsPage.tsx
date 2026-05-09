@@ -1,5 +1,6 @@
 // RecordsPage.tsx — 笔录制作（阶段 1 MVP：对接 SQLite）
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { Editor as TiptapEditor } from '@tiptap/react'
 import type { Case, Criminal, Record, RecordInput, Template } from '../api'
 import {
   addRecord,
@@ -19,15 +20,33 @@ import {
 import { FALLBACK_TEMPLATE_NAMES, fallbackTemplatesStub } from '../config/recordTemplatesFallback'
 import { isTauriRuntime as isTauri } from '../lib/tauriEnv'
 import {
-  applyInsertDate,
+  PLACEHOLDER_INTERVIEW_DATE,
+  PLACEHOLDER_PRISONER_NAME,
   dbDateTimeToLocalValue,
   localValueToDbDateTime,
   nowLocalValue,
-  replacePrisonerNamePlaceholders,
   todayYmd,
 } from '../lib/recordFormUtils'
+import RecordRichTextEditor from '../components/RecordRichTextEditor'
 
 const PAGE_SIZE = 15
+type GuidedSchema = {
+  version?: number
+  headerFields?: Array<{ key: string; label: string; placeholder?: string }>
+  questions?: Array<{ id: string; prompt: string; multiline?: boolean }>
+  signaturePlaceholder?: string
+}
+
+function parseGuidedSchema(raw: string): GuidedSchema | null {
+  if (!raw.trim()) return null
+  try {
+    const parsed = JSON.parse(raw) as GuidedSchema
+    if (!Array.isArray(parsed.questions) || parsed.questions.length === 0) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
 
 type StatusTab = 'all' | 'Draft' | 'Pending' | 'Approved' | 'Rejected'
 
@@ -99,7 +118,17 @@ export default function RecordsPage() {
   const [detailCaseNumberDisplay, setDetailCaseNumberDisplay] = useState('')
   const [resolvedCriminalName, setResolvedCriminalName] = useState('')
   const [overwritePrompt, setOverwritePrompt] = useState<OverwritePrompt>(null)
-  const contentTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const [editorApi, setEditorApi] = useState<TiptapEditor | null>(null)
+  const [editorText, setEditorText] = useState('')
+  /** 富文本初始化会把模板正文规范化（JSON 化）；用基线对比来判断“是否真的被用户修改过” */
+  const [contentBaseline, setContentBaseline] = useState('')
+  const [contentDirty, setContentDirty] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(true)
+  const [guidedMeta, setGuidedMeta] = useState<{ [key: string]: string }>({})
+  const [guidedAnswers, setGuidedAnswers] = useState<{ [key: string]: string }>({})
+  const pendingOpenedRef = useRef(false)
+
+  const PENDING_KEY = 'prisonsis_pending_record_view'
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -131,6 +160,31 @@ export default function RecordsPage() {
   useEffect(() => {
     loadRecords()
   }, [loadRecords])
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<{ page?: string; search?: string }>
+      if (ce.detail?.page !== 'records') return
+      const searchText = (ce.detail?.search || '').trim()
+      setSearchInput(searchText)
+      setAppliedSearch(searchText)
+      setPage(0)
+    }
+    window.addEventListener('prisonsis:apply-search', handler as EventListener)
+    return () => window.removeEventListener('prisonsis:apply-search', handler as EventListener)
+  }, [])
+
+  // Esc 关闭抽屉
+  useEffect(() => {
+    if (!detailOpen) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (drawerOpen) setDrawerOpen(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [detailOpen, drawerOpen])
 
   /** 弹窗打开时拉取模板列表 */
   useEffect(() => {
@@ -172,7 +226,18 @@ export default function RecordsPage() {
     setForm(f => {
       if (f.content.trim() !== '') return f
       const t = templates.find(x => x.name === f.record_type)
-      return t?.content ? { ...f, content: t.content } : f
+      if (!t) return f
+      if (t.template_kind === 'guided') {
+        const schema = parseGuidedSchema(t.guide_schema_json || '')
+        if (schema) {
+          const nextMeta: { [key: string]: string } = {}
+          for (const hf of schema.headerFields ?? []) nextMeta[hf.key] = ''
+          setGuidedMeta(nextMeta)
+          setGuidedAnswers({})
+          return { ...f, content: '' }
+        }
+      }
+      return t.content ? { ...f, content: t.content } : f
     })
   }, [detailOpen, editingId, detailLoading, templates])
 
@@ -216,6 +281,16 @@ export default function RecordsPage() {
     if (!detailOpen) setOverwritePrompt(null)
   }, [detailOpen])
 
+  // 首次拿到“规范化后的 JSON content”时设为基线；只有偏离基线才算用户修改过正文
+  useEffect(() => {
+    if (!detailOpen) return
+    if (!editorApi) return
+    if (contentBaseline) return
+    if (!form.content.trim()) return
+    setContentBaseline(form.content)
+    setContentDirty(false)
+  }, [detailOpen, editorApi, contentBaseline, form.content])
+
   const selectedCriminalName = (): string => {
     const hit = pickerList.find(c => c.id === form.criminal_id)
     if (hit) return hit.name
@@ -223,44 +298,92 @@ export default function RecordsPage() {
     return form.criminal_id ? `ID ${form.criminal_id}` : '未选择'
   }
 
+  const selectedTemplate = templates.find(t => t.name === form.record_type)
+  const selectedGuidedSchema =
+    selectedTemplate?.template_kind === 'guided' ? parseGuidedSchema(selectedTemplate.guide_schema_json || '') : null
+  const isGuidedTemplate = Boolean(selectedGuidedSchema)
+  const guidedAutoInkTokenKeys = useMemo(
+    () => selectedGuidedSchema?.headerFields?.map(field => (field.label || '').trim()).filter(Boolean) ?? [],
+    [selectedGuidedSchema]
+  )
+
+  const composeGuidedContent = () => {
+    if (!selectedGuidedSchema) return ''
+    const lines: string[] = []
+    lines.push(form.record_type)
+    lines.push('')
+    lines.push(`时间：${form.record_date || ''}`)
+    lines.push(`地点：${form.record_location || ''}`)
+    lines.push(`询/讯问人：${form.interrogator_id || ''}`)
+    lines.push(`记录人：${form.recorder_id || ''}`)
+    lines.push(`被询/讯问人：${selectedCriminalName()}`)
+    for (const field of selectedGuidedSchema.headerFields ?? []) {
+      lines.push(`${field.label}：${guidedMeta[field.key] ?? ''}`)
+    }
+    lines.push('')
+    for (const q of selectedGuidedSchema.questions ?? []) {
+      lines.push(`问：${q.prompt}`)
+      lines.push(`答：${guidedAnswers[q.id] ?? ''}`)
+      lines.push('')
+    }
+    lines.push(selectedGuidedSchema.signaturePlaceholder || '被询/讯问人签名：__________')
+    return lines.join('\n')
+  }
+
   const templateBodyForType = (typeName: string): string => {
     const t = templates.find(x => x.name === typeName)
     return t?.content ?? ''
   }
 
-  /** 正文仍与当前类型模板一致（用户未改）时，切换类型不提示覆盖，直接切换 */
-  const isContentStillDefaultTemplate = (): boolean => {
-    const cur = form.content
-    if (!cur.trim()) return true
-    const tpl = templateBodyForType(form.record_type)
-    if (!tpl.trim()) return false
-    return cur.replace(/\r\n/g, '\n').trim() === tpl.replace(/\r\n/g, '\n').trim()
-  }
-
   const applyTemplateWithConfirm = (nextType: string, nextBody: string) => {
     const go = () => setForm(f => ({ ...f, record_type: nextType, content: nextBody }))
-    if (isContentStillDefaultTemplate()) {
+    // 仅当用户真的修改过正文（dirty）才需要覆盖确认
+    if (!contentDirty || !editorText.trim()) {
+      setContentBaseline('')
+      setContentDirty(false)
       go()
       return
     }
+    // 覆盖确认弹窗必须处于最前，避免被“基本信息抽屉”遮挡
+    setDrawerOpen(false)
     setOverwritePrompt({ kind: 'recordType', nextType, nextBody: nextBody })
   }
 
   const handleRecordTypeSelect = (nextType: string) => {
     if (nextType === form.record_type) return
+    const nextTemplate = templates.find(t => t.name === nextType)
+    if (nextTemplate?.template_kind === 'guided') {
+      const schema = parseGuidedSchema(nextTemplate.guide_schema_json || '')
+      const nextMeta: { [key: string]: string } = {}
+      for (const hf of schema?.headerFields ?? []) nextMeta[hf.key] = ''
+      setGuidedMeta(nextMeta)
+      setGuidedAnswers({})
+      applyTemplateWithConfirm(nextType, '')
+      return
+    }
     applyTemplateWithConfirm(nextType, templateBodyForType(nextType))
   }
 
   const handleApplyTemplateClick = () => {
+    if (isGuidedTemplate) {
+      setContentBaseline('')
+      setContentDirty(false)
+      setForm(f => ({ ...f, content: composeGuidedContent() }))
+      return
+    }
     const body = templateBodyForType(form.record_type)
     if (!body) {
       alert('当前类型暂无模板正文')
       return
     }
-    if (!form.content.trim()) {
+    if (!contentDirty || !editorText.trim()) {
+      setContentBaseline('')
+      setContentDirty(false)
       setForm(f => ({ ...f, content: body }))
       return
     }
+    // 覆盖确认弹窗必须处于最前，避免被“基本信息抽屉”遮挡
+    setDrawerOpen(false)
     setOverwritePrompt({ kind: 'applyTemplate', body })
   }
 
@@ -269,30 +392,33 @@ export default function RecordsPage() {
   const confirmOverwrite = () => {
     if (!overwritePrompt) return
     if (overwritePrompt.kind === 'recordType') {
+      setContentBaseline('')
+      setContentDirty(false)
       setForm(f => ({
         ...f,
         record_type: overwritePrompt.nextType,
         content: overwritePrompt.nextBody,
       }))
     } else {
+      setContentBaseline('')
+      setContentDirty(false)
       setForm(f => ({ ...f, content: overwritePrompt.body }))
     }
     setOverwritePrompt(null)
   }
 
   const handleInsertDateClick = () => {
-    const ta = contentTextareaRef.current
-    const cursor = ta?.selectionStart ?? form.content.length
-    const { content, newCursor } = applyInsertDate(form.content, cursor, todayYmd())
-    setForm(f => ({ ...f, content }))
-    requestAnimationFrame(() => {
-      ta?.focus()
-      try {
-        ta?.setSelectionRange(newCursor, newCursor)
-      } catch {
-        /* ignore */
-      }
-    })
+    if (!editorApi) return
+    const today = todayYmd()
+    const placeholder = PLACEHOLDER_INTERVIEW_DATE
+    const html = editorApi.getHTML()
+    editorApi.commands.focus()
+    if (editorApi.getText().includes(placeholder) && html.includes(placeholder)) {
+      const nextHtml = html.split(placeholder).join(today)
+      editorApi.commands.setContent(nextHtml)
+      return
+    }
+    editorApi.commands.insertContent(today)
   }
 
   const handleReplaceNameClick = () => {
@@ -300,8 +426,17 @@ export default function RecordsPage() {
       alert('请先选择服刑人员')
       return
     }
+    if (!editorApi) return
+    const placeholder = PLACEHOLDER_PRISONER_NAME
     const name = selectedCriminalName()
-    setForm(f => ({ ...f, content: replacePrisonerNamePlaceholders(f.content, name) }))
+    const html = editorApi.getHTML()
+    editorApi.commands.focus()
+    if (editorApi.getText().includes(placeholder) && html.includes(placeholder)) {
+      const nextHtml = html.split(placeholder).join(name)
+      editorApi.commands.setContent(nextHtml)
+      return
+    }
+    editorApi.commands.insertContent(name)
   }
 
   const handleSearchSubmit = () => {
@@ -316,6 +451,11 @@ export default function RecordsPage() {
     setEditingRecordStatus('')
     setDetailCaseNumberDisplay('')
     setDetailReadonly(false)
+    setDrawerOpen(true)
+    setContentBaseline('')
+    setContentDirty(false)
+    setGuidedMeta({})
+    setGuidedAnswers({})
     const firstType = templates[0]?.name ?? FALLBACK_TEMPLATE_NAMES[0]
     const tpl = templates.find(t => t.name === firstType)
     setForm({
@@ -337,6 +477,11 @@ export default function RecordsPage() {
     setDetailOpen(true)
     setDetailLoading(true)
     setDetailReadonly(readonly)
+    setDrawerOpen(true)
+    setContentBaseline('')
+    setContentDirty(false)
+    setGuidedMeta({})
+    setGuidedAnswers({})
     try {
       const r = await getRecordById(id)
       setEditingId(r.id)
@@ -363,6 +508,38 @@ export default function RecordsPage() {
       setDetailLoading(false)
     }
   }
+
+  // 支持从首页跳转过来：打开待查看的笔录（只读）
+  useEffect(() => {
+    if (!isTauri()) return
+    if (detailOpen) return
+    if (pendingOpenedRef.current) return
+
+    const raw = localStorage.getItem(PENDING_KEY)
+    if (!raw) return
+
+    let pending: { id: number; readonly?: boolean } | null = null
+    try {
+      pending = JSON.parse(raw)
+    } catch {
+      pending = null
+    }
+
+    if (!pending?.id) return
+
+    pendingOpenedRef.current = true
+    void (async () => {
+      try {
+        await openViewOrEdit(pending!.id, true)
+      } finally {
+        try {
+          localStorage.removeItem(PENDING_KEY)
+        } catch {
+          /* ignore */
+        }
+      }
+    })()
+  }, [detailOpen])
 
   const buildPersistRecord = (): Record => ({
     id: editingId!,
@@ -425,7 +602,7 @@ export default function RecordsPage() {
       alert('请选择服刑人员')
       return
     }
-    if (!form.content.trim()) {
+    if (!editorText.trim()) {
       alert('正文不能为空，请填写后再提交审批')
       return
     }
@@ -507,8 +684,8 @@ export default function RecordsPage() {
               height: 36,
               minWidth: 200,
               borderRadius: 8,
-              border: '1px solid var(--glass-border)',
-              background: 'rgba(0,0,0,.25)',
+              border: '1px solid var(--input-border)',
+              background: 'var(--input-bg)',
               color: 'var(--text-primary)',
               padding: '0 12px',
             }}
@@ -622,8 +799,13 @@ export default function RecordsPage() {
           className="record-modal-backdrop"
           role="presentation"
           onMouseDown={() => !detailLoading && setDetailOpen(false)}
+          style={{ alignItems: 'stretch', justifyContent: 'stretch', padding: 0 }}
         >
-          <div className="record-modal" onMouseDown={e => e.stopPropagation()}>
+          <div
+            className="record-modal"
+            onMouseDown={e => e.stopPropagation()}
+            style={{ width: '100%', height: '100%', maxHeight: 'none', borderRadius: 0 }}
+          >
             <div className="record-modal__header">
               <div className="record-modal__title-wrap">
                 <h2>{detailReadonly ? '查看笔录' : editingId == null ? '新建笔录' : '编辑草稿'}</h2>
@@ -652,165 +834,23 @@ export default function RecordsPage() {
               </div>
             ) : (
               <>
-                <div className="record-modal__body">
-                  <div>
-                    <div className="record-modal__section-title">基本信息</div>
-                    <div className="record-modal__grid">
-                      <label className="record-modal__field">
-                        <span>笔录类型</span>
-                        <select
-                          className="glass-input glass-input--select"
-                          disabled={detailReadonly}
-                          value={form.record_type}
-                          onChange={e => handleRecordTypeSelect(e.target.value)}
-                        >
-                          {templateListForSelect.map(t => (
-                            <option key={t.id} value={t.name}>
-                              {t.name}
-                            </option>
-                          ))}
-                          {showLegacyRecordType && (
-                            <option value={form.record_type}>
-                              当前：{form.record_type}（未匹配模板）
-                            </option>
-                          )}
-                        </select>
-                      </label>
-                      <label className="record-modal__field">
-                        <span>谈话日期 / 时间</span>
-                        <input
-                          type="datetime-local"
-                          className="glass-input glass-input--datetime"
-                          disabled={detailReadonly}
-                          value={dbDateTimeToLocalValue(form.record_date)}
-                          onChange={e =>
-                            setForm(f => ({ ...f, record_date: localValueToDbDateTime(e.target.value) }))
-                          }
-                        />
-                      </label>
-                      <div className="record-modal__criminal-strip">
-                        <div>
-                          <span style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
-                            服刑人员
-                          </span>
-                          <strong>{selectedCriminalName()}</strong>
-                        </div>
-                        {!detailReadonly && (
-                          <button type="button" className="glass-btn small" onClick={() => setPickerOpen(true)}>
-                            选择人员
-                          </button>
-                        )}
-                      </div>
-                      {caseFieldEditable ? (
-                        <label className="record-modal__field record-modal__field--full">
-                          <span>关联案件（可选）</span>
-                          <select
-                            className="glass-input glass-input--select"
-                            value={form.case_id != null && form.case_id > 0 ? String(form.case_id) : ''}
-                            onChange={e => {
-                              const v = e.target.value
-                              setForm(f => ({
-                                ...f,
-                                case_id: v === '' ? null : Number(v),
-                              }))
-                            }}
-                          >
-                            <option value="">不关联</option>
-                            {caseOptions.map(c => (
-                              <option key={c.id} value={String(c.id)}>
-                                {c.case_number}
-                                {c.title ? ` · ${c.title}` : ''}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      ) : (
-                        <div className="record-modal__field record-modal__field--full">
-                          <span style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
-                            关联案件（案号）
-                          </span>
-                          <strong>{detailCaseNumberDisplay || '—'}</strong>
-                        </div>
-                      )}
+                <div className="record-modal__body" style={{ flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
+                  <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                      <div className="record-modal__section-title" style={{ marginBottom: 0 }}>笔录正文</div>
+                      <div style={{ flex: 1 }} />
+                      <button
+                        type="button"
+                        className="glass-btn small"
+                        onClick={() => setDrawerOpen(true)}
+                      >
+                        基本信息
+                      </button>
                     </div>
-                  </div>
-                  <div>
-                    <div className="record-modal__section-title">人员与场所</div>
-                    <div className="record-modal__grid">
-                      <label className="record-modal__field record-modal__field--full">
-                        <span>地点</span>
-                        <select
-                          className="glass-input glass-input--select"
-                          disabled={detailReadonly}
-                          value={locationSelectValue}
-                          onChange={e => {
-                            const v = e.target.value
-                            if (v === PRISON_RECORD_LOCATION_OTHER) {
-                              setForm(f => ({ ...f, record_location: '' }))
-                            } else {
-                              setForm(f => ({ ...f, record_location: v }))
-                            }
-                          }}
-                        >
-                          {PRISON_RECORD_LOCATION_PRESETS.map(p => (
-                            <option key={p} value={p}>
-                              {p}
-                            </option>
-                          ))}
-                          <option value={PRISON_RECORD_LOCATION_OTHER}>{PRISON_RECORD_LOCATION_OTHER}</option>
-                        </select>
-                      </label>
-                      {locationSelectValue === PRISON_RECORD_LOCATION_OTHER && (
-                        <label className="record-modal__field record-modal__field--full">
-                          <span>具体地点</span>
-                          <input
-                            type="text"
-                            className="glass-input"
-                            disabled={detailReadonly}
-                            placeholder="填写具体地点"
-                            value={locationOtherValue}
-                            onChange={e => setForm(f => ({ ...f, record_location: e.target.value }))}
-                          />
-                        </label>
-                      )}
-                      <label className="record-modal__field">
-                        <span>民警（谈话人）标识</span>
-                        <input
-                          type="text"
-                          className="glass-input"
-                          disabled={detailReadonly}
-                          value={form.interrogator_id}
-                          onChange={e => setForm(f => ({ ...f, interrogator_id: e.target.value }))}
-                        />
-                      </label>
-                      <label className="record-modal__field">
-                        <span>记录人标识</span>
-                        <input
-                          type="text"
-                          className="glass-input"
-                          disabled={detailReadonly}
-                          value={form.recorder_id}
-                          onChange={e => setForm(f => ({ ...f, recorder_id: e.target.value }))}
-                        />
-                      </label>
-                      <label className="record-modal__field record-modal__field--full">
-                        <span>在场人员</span>
-                        <input
-                          type="text"
-                          className="glass-input"
-                          disabled={detailReadonly}
-                          value={form.present_persons}
-                          onChange={e => setForm(f => ({ ...f, present_persons: e.target.value }))}
-                        />
-                      </label>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="record-modal__section-title">笔录正文</div>
-                    <p className="record-modal__hint">
+                    <p className="record-modal__hint" style={{ marginBottom: 10 }}>
                       以下为模板框架，请据实填写；可使用工具条插入日期或替换「[服刑人员姓名]」占位符。
                     </p>
-                    <div className="record-modal__content-toolbar">
+                    <div className="record-modal__content-toolbar" style={{ marginBottom: 12 }}>
                       <button
                         type="button"
                         className="glass-btn small"
@@ -839,16 +879,297 @@ export default function RecordsPage() {
                         填入服刑人员姓名
                       </button>
                     </div>
-                    <textarea
-                      ref={contentTextareaRef}
-                      className="glass-input glass-textarea"
-                      disabled={detailReadonly}
-                      rows={8}
-                      value={form.content}
-                      onChange={e => setForm(f => ({ ...f, content: e.target.value }))}
-                      aria-label="笔录正文"
-                    />
+                    <div style={{ flex: 1, minHeight: 0 }}>
+                      <RecordRichTextEditor
+                        value={form.content}
+                        editable={!detailReadonly}
+                        autoInkTokenKeys={guidedAutoInkTokenKeys}
+                        onEditorReady={setEditorApi}
+                        onTextChange={setEditorText}
+                        outlineWidth={160}
+                        editorMinHeight={520}
+                        onChange={(nextValue: string) => {
+                          setForm(f => ({ ...f, content: nextValue }))
+                          if (contentBaseline) {
+                            setContentDirty(nextValue !== contentBaseline)
+                          } else {
+                            setContentDirty(false)
+                          }
+                        }}
+                      />
+                    </div>
                   </div>
+
+                  {/* overlay drawer */}
+                  {drawerOpen && (
+                    <div className="record-drawer-layer" role="presentation">
+                      <div
+                        className="record-drawer-backdrop"
+                        role="presentation"
+                        onMouseDown={() => setDrawerOpen(false)}
+                      />
+                      <div className="record-drawer-panel" onMouseDown={e => e.stopPropagation()}>
+                        <div className="record-drawer-header">
+                          <div className="record-drawer-title">基本信息</div>
+                          <button type="button" className="glass-btn small" onClick={() => setDrawerOpen(false)}>
+                            关闭
+                          </button>
+                        </div>
+
+                        <div className="record-drawer-summary">
+                          <div className="record-drawer-summary__item">
+                            <div className="k">服刑人员</div>
+                            <div className="v">{selectedCriminalName()}</div>
+                          </div>
+                          <div className="record-drawer-summary__item">
+                            <div className="k">谈话时间</div>
+                            <div className="v">{dbDateTimeToLocalValue(form.record_date) || '未设置'}</div>
+                          </div>
+                          <div className="record-drawer-summary__item">
+                            <div className="k">状态</div>
+                            <div className="v" style={{ color: statusColor(editingRecordStatus || 'Draft') }}>
+                              {statusLabel(editingRecordStatus || 'Draft')}
+                            </div>
+                          </div>
+                          <div className="record-drawer-summary__item">
+                            <div className="k">类型</div>
+                            <div className="v">{form.record_type || '—'}</div>
+                          </div>
+                        </div>
+
+                        <div className="record-drawer-body">
+                          <div className="record-modal__section-title" style={{ marginBottom: 8 }}>
+                            基本字段
+                          </div>
+                          <div className="record-modal__grid">
+                            <label className="record-modal__field">
+                              <span>笔录类型</span>
+                              <select
+                                className="glass-input glass-input--select"
+                                disabled={detailReadonly}
+                                value={form.record_type}
+                                onChange={e => handleRecordTypeSelect(e.target.value)}
+                              >
+                                {templateListForSelect.map(t => (
+                                  <option key={t.id} value={t.name}>
+                                    {t.name}
+                                  </option>
+                                ))}
+                                {showLegacyRecordType && (
+                                  <option value={form.record_type}>
+                                    当前：{form.record_type}（未匹配模板）
+                                  </option>
+                                )}
+                              </select>
+                            </label>
+                            <label className="record-modal__field">
+                              <span>谈话日期 / 时间</span>
+                              <input
+                                type="datetime-local"
+                                className="glass-input glass-input--datetime"
+                                disabled={detailReadonly}
+                                value={dbDateTimeToLocalValue(form.record_date)}
+                                onChange={e =>
+                                  setForm(f => ({ ...f, record_date: localValueToDbDateTime(e.target.value) }))
+                                }
+                              />
+                            </label>
+                            <div className="record-modal__criminal-strip">
+                              <div>
+                                <span style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
+                                  服刑人员
+                                </span>
+                                <strong>{selectedCriminalName()}</strong>
+                              </div>
+                              {!detailReadonly && (
+                                <button type="button" className="glass-btn small" onClick={() => setPickerOpen(true)}>
+                                  选择人员
+                                </button>
+                              )}
+                            </div>
+                            {caseFieldEditable ? (
+                              <label className="record-modal__field record-modal__field--full">
+                                <span>关联案件（可选）</span>
+                                <select
+                                  className="glass-input glass-input--select"
+                                  value={form.case_id != null && form.case_id > 0 ? String(form.case_id) : ''}
+                                  onChange={e => {
+                                    const v = e.target.value
+                                    setForm(f => ({
+                                      ...f,
+                                      case_id: v === '' ? null : Number(v),
+                                    }))
+                                  }}
+                                >
+                                  <option value="">不关联</option>
+                                  {caseOptions.map(c => (
+                                    <option key={c.id} value={String(c.id)}>
+                                      {c.case_number}
+                                      {c.title ? ` · ${c.title}` : ''}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            ) : (
+                              <div className="record-modal__field record-modal__field--full">
+                                <span style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
+                                  关联案件（案号）
+                                </span>
+                                <strong>{detailCaseNumberDisplay || '—'}</strong>
+                              </div>
+                            )}
+                          </div>
+
+                          {isGuidedTemplate && (
+                            <>
+                              <div className="record-modal__section-title" style={{ margin: '16px 0 8px' }}>
+                                引导式录入（结构化）
+                              </div>
+                              <div className="record-modal__grid">
+                                {(selectedGuidedSchema?.headerFields ?? []).map(field => (
+                                  <label key={field.key} className="record-modal__field record-modal__field--full">
+                                    <span>{field.label}</span>
+                                    <input
+                                      type="text"
+                                      className="glass-input"
+                                      disabled={detailReadonly}
+                                      placeholder={field.placeholder || ''}
+                                      value={guidedMeta[field.key] ?? ''}
+                                      onChange={e =>
+                                        setGuidedMeta(prev => ({ ...prev, [field.key]: e.target.value }))
+                                      }
+                                    />
+                                  </label>
+                                ))}
+                                {(selectedGuidedSchema?.questions ?? []).map(question => (
+                                  <label
+                                    key={question.id}
+                                    className="record-modal__field record-modal__field--full"
+                                  >
+                                    <span>{question.prompt}</span>
+                                    {question.multiline ? (
+                                      <textarea
+                                        className="glass-input glass-textarea"
+                                        rows={4}
+                                        disabled={detailReadonly}
+                                        value={guidedAnswers[question.id] ?? ''}
+                                        onChange={e =>
+                                          setGuidedAnswers(prev => ({
+                                            ...prev,
+                                            [question.id]: e.target.value,
+                                          }))
+                                        }
+                                      />
+                                    ) : (
+                                      <input
+                                        type="text"
+                                        className="glass-input"
+                                        disabled={detailReadonly}
+                                        value={guidedAnswers[question.id] ?? ''}
+                                        onChange={e =>
+                                          setGuidedAnswers(prev => ({
+                                            ...prev,
+                                            [question.id]: e.target.value,
+                                          }))
+                                        }
+                                      />
+                                    )}
+                                  </label>
+                                ))}
+                                {!detailReadonly && (
+                                  <div className="record-modal__field record-modal__field--full">
+                                    <button
+                                      type="button"
+                                      className="glass-btn"
+                                      onClick={() => {
+                                        setContentBaseline('')
+                                        setContentDirty(false)
+                                        setForm(f => ({ ...f, content: composeGuidedContent() }))
+                                      }}
+                                    >
+                                      生成问答正文
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </>
+                          )}
+
+                          <div className="record-modal__section-title" style={{ margin: '16px 0 8px' }}>
+                            人员与场所
+                          </div>
+                          <div className="record-modal__grid">
+                            <label className="record-modal__field record-modal__field--full">
+                              <span>地点</span>
+                              <select
+                                className="glass-input glass-input--select"
+                                disabled={detailReadonly}
+                                value={locationSelectValue}
+                                onChange={e => {
+                                  const v = e.target.value
+                                  if (v === PRISON_RECORD_LOCATION_OTHER) {
+                                    setForm(f => ({ ...f, record_location: '' }))
+                                  } else {
+                                    setForm(f => ({ ...f, record_location: v }))
+                                  }
+                                }}
+                              >
+                                {PRISON_RECORD_LOCATION_PRESETS.map(p => (
+                                  <option key={p} value={p}>
+                                    {p}
+                                  </option>
+                                ))}
+                                <option value={PRISON_RECORD_LOCATION_OTHER}>{PRISON_RECORD_LOCATION_OTHER}</option>
+                              </select>
+                            </label>
+                            {locationSelectValue === PRISON_RECORD_LOCATION_OTHER && (
+                              <label className="record-modal__field record-modal__field--full">
+                                <span>具体地点</span>
+                                <input
+                                  type="text"
+                                  className="glass-input"
+                                  disabled={detailReadonly}
+                                  placeholder="填写具体地点"
+                                  value={locationOtherValue}
+                                  onChange={e => setForm(f => ({ ...f, record_location: e.target.value }))}
+                                />
+                              </label>
+                            )}
+                            <label className="record-modal__field">
+                              <span>民警（谈话人）标识</span>
+                              <input
+                                type="text"
+                                className="glass-input"
+                                disabled={detailReadonly}
+                                value={form.interrogator_id}
+                                onChange={e => setForm(f => ({ ...f, interrogator_id: e.target.value }))}
+                              />
+                            </label>
+                            <label className="record-modal__field">
+                              <span>记录人标识</span>
+                              <input
+                                type="text"
+                                className="glass-input"
+                                disabled={detailReadonly}
+                                value={form.recorder_id}
+                                onChange={e => setForm(f => ({ ...f, recorder_id: e.target.value }))}
+                              />
+                            </label>
+                            <label className="record-modal__field record-modal__field--full">
+                              <span>在场人员</span>
+                              <input
+                                type="text"
+                                className="glass-input"
+                                disabled={detailReadonly}
+                                value={form.present_persons}
+                                onChange={e => setForm(f => ({ ...f, present_persons: e.target.value }))}
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="record-modal__footer">
                   <button type="button" className="glass-btn" onClick={() => setDetailOpen(false)}>

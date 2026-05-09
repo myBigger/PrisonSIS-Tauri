@@ -2,12 +2,22 @@
 import { useEffect, useState } from 'react'
 import { getDashboardStats, getRecentRecords } from '../api'
 import type { DashboardStats, Record } from '../api'
+import RecordViewModal from '../components/RecordViewModal'
 
 // 模拟数据（开发预览用）
 const MOCK_STATS: DashboardStats = {
   today_records: 3, pending_approvals: 12, total_criminals: 248,
-  total_cases: 56, yesterday_delta: 1, expired_count: 3,
+  total_cases: 56, closed_cases: 18, active_cases: 38, yesterday_delta: 1, expired_count: 3,
   month_new_criminals: 7, month_new_cases: 3,
+  month_records: 63, approval_rate: 94.2, avg_approval_hours: 2.3, archive_rate: 12.4,
+  monthly_trends: [
+    { month: '2026-01', records: 42, criminals: 38 },
+    { month: '2026-02', records: 55, criminals: 45 },
+  ],
+  crime_distribution: [
+    { label: '盗窃罪', count: 86, percent: 34.0 },
+    { label: '故意伤害', count: 45, percent: 18.0 },
+  ],
 }
 
 const MOCK_RECORDS: Record[] = [
@@ -39,8 +49,22 @@ export default function HomePage() {
   const [records, setRecords] = useState<Record[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [displayName, setDisplayName] = useState('用户')
+  const [viewOpen, setViewOpen] = useState(false)
+  const [viewRecordId, setViewRecordId] = useState<number | null>(null)
 
   useEffect(() => {
+    try {
+      const raw = localStorage.getItem('prisonsis_user')
+      if (raw) {
+        const u = JSON.parse(raw) as { real_name?: string; username?: string; role?: string }
+        const name = (u.real_name || u.username || '').trim()
+        setDisplayName(name || (u.role === 'Admin' ? '管理员' : '用户'))
+      }
+    } catch {
+      // ignore parse errors; keep default display name
+    }
+
     async function loadData() {
       try {
         if (isTauri()) {
@@ -69,6 +93,12 @@ export default function HomePage() {
     loadData()
   }, [])
 
+  const openView = (id: number) => {
+    if (!isTauri()) return
+    setViewRecordId(id)
+    setViewOpen(true)
+  }
+
   const today = new Date().toLocaleDateString('zh-CN', {
     year: 'numeric', month: 'long', day: 'numeric', weekday: 'long',
   })
@@ -76,7 +106,7 @@ export default function HomePage() {
   return (
     <div className="page">
       <div>
-        <h1 className="page-title">你好，管理员 👋</h1>
+        <h1 className="page-title">你好，{displayName} 👋</h1>
         <p className="page-subtitle">
           今天是 {today}
           {error && <span style={{ color: 'var(--accent-secondary)', marginLeft: 12 }}>({error})</span>}
@@ -103,7 +133,7 @@ export default function HomePage() {
           },
           {
             title: '案件总数', value: stats?.total_cases ?? 0,
-            sub: `本月新增 ${stats?.month_new_cases ?? 0}`,
+            sub: `已结案 ${stats?.closed_cases ?? 0} / 在办 ${stats?.active_cases ?? 0}`,
             icon: '📁', accent: 'rgba(139,92,246,0.12)', border: 'rgba(139,92,246,0.25)',
           },
         ].map((s, i) => (
@@ -136,7 +166,7 @@ export default function HomePage() {
               {records.map(r => (
                 <tr key={r.id}>
                   <td className="cell-mono">{r.record_id}</td>
-                  <td>—</td>
+                  <td>{r.case_number?.trim() ? r.case_number : '—'}</td>
                   <td>{r.criminal_name}</td>
                   <td style={{ color: 'var(--text-secondary)' }}>{r.record_type}</td>
                   <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{r.record_date}</td>
@@ -147,13 +177,32 @@ export default function HomePage() {
                       <span style={{ color: statusColor(r.status) }}>{statusLabel(r.status)}</span>
                     </span>
                   </td>
-                  <td><button className="glass-btn small">查看</button></td>
+                  <td>
+                    <button
+                      type="button"
+                      className="glass-btn small"
+                      disabled={!isTauri()}
+                      onClick={() => openView(r.id)}
+                    >
+                      查看
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      <RecordViewModal
+        open={viewOpen}
+        recordId={viewRecordId ?? undefined}
+        onClose={() => {
+          setViewOpen(false)
+          setViewRecordId(null)
+        }}
+        zIndex={2400}
+      />
     </div>
   )
 }

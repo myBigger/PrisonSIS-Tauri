@@ -76,6 +76,19 @@ export default function CasesPage() {
     loadCases()
   }, [loadCases])
 
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<{ page?: string; search?: string }>
+      if (ce.detail?.page !== 'cases') return
+      const searchText = (ce.detail?.search || '').trim()
+      setSearchInput(searchText)
+      setAppliedSearch(searchText)
+      setPage(0)
+    }
+    window.addEventListener('prisonsis:apply-search', handler as EventListener)
+    return () => window.removeEventListener('prisonsis:apply-search', handler as EventListener)
+  }, [])
+
   const openCreate = () => {
     setFormMode('create')
     setEditingCase(null)
