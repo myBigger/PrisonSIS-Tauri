@@ -3,6 +3,8 @@ import { useState } from 'react'
 import { changeOwnPassword } from '../api'
 import { formatInvokeError } from '../lib/invokeError'
 import { isTauriRuntime as isTauri } from '../lib/tauriEnv'
+import Icon from './icons/Icon'
+import IconButton from './icons/IconButton'
 
 interface User {
   username: string
@@ -14,7 +16,8 @@ interface User {
 interface Props {
   currentPage: string
   onToggleSidebar: () => void
-  onThemeSwitch: (theme: string) => void
+  themeMode: 'dark' | 'light'
+  onThemeToggle: () => void
   onGlobalSearch: (query: string) => void
   user: User
 }
@@ -34,8 +37,11 @@ const pageTitles: Record<string, string> = {
   logs: '日志审计',
 }
 
-export default function GlassHeader({ currentPage, onToggleSidebar, onThemeSwitch, onGlobalSearch, user }: Props) {
+export default function GlassHeader({ currentPage, onToggleSidebar, themeMode, onThemeToggle, onGlobalSearch, user }: Props) {
   const [globalSearchInput, setGlobalSearchInput] = useState('')
+  const [notifOpen, setNotifOpen] = useState(false)
+  const [notifUnread, setNotifUnread] = useState(2)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [pwdOpen, setPwdOpen] = useState(false)
   const [pwdOld, setPwdOld] = useState('')
   const [pwdNew, setPwdNew] = useState('')
@@ -80,17 +86,24 @@ export default function GlassHeader({ currentPage, onToggleSidebar, onThemeSwitc
     onGlobalSearch(q)
   }
 
+  const openPwdFromSettings = () => {
+    setSettingsOpen(false)
+    setPwdOpen(true)
+  }
+
   return (
     <>
       <header className="header">
-        <button type="button" className="glass-btn icon-btn" onClick={onToggleSidebar} title="切换侧栏">
-          ☰
-        </button>
+        <IconButton label="切换侧栏" onClick={onToggleSidebar}>
+          <Icon name="menu" />
+        </IconButton>
 
         <div className="header-title">{pageTitles[currentPage] || '首页'}</div>
 
         <div className="header-search">
-          <span className="header-search-icon">🔍</span>
+          <span className="header-search-icon" aria-hidden>
+            <Icon name="search" size={16} />
+          </span>
           <input
             type="text"
             placeholder="全局搜索（回车）"
@@ -101,37 +114,102 @@ export default function GlassHeader({ currentPage, onToggleSidebar, onThemeSwitc
             }}
           />
         </div>
-        <button type="button" className="glass-btn" onClick={submitGlobalSearch}>
-          搜索
-        </button>
+        <IconButton label="搜索" onClick={submitGlobalSearch}>
+          <Icon name="search" />
+        </IconButton>
 
-        <div className="theme-switcher">
-          <button type="button" className="glass-btn" onClick={() => onThemeSwitch('dark')}>
-            深色
-          </button>
-          <button type="button" className="glass-btn" onClick={() => onThemeSwitch('light')}>
-            浅色
-          </button>
-        </div>
-
-        <div className="header-user">
-          <span>{user.real_name || user.username}</span>
-        </div>
-
-        <button
-          type="button"
-          className="glass-btn small"
-          title={isTauri() ? '修改登录密码' : '仅桌面端可用'}
-          disabled={!isTauri()}
-          onClick={() => setPwdOpen(true)}
+        <IconButton
+          label={notifUnread > 0 ? `通知（${notifUnread} 条未读）` : '通知'}
+          title={notifUnread > 0 ? `通知（${notifUnread} 条未读）` : '通知'}
+          className={notifUnread > 0 ? 'primary' : undefined}
+          onClick={() => {
+            setNotifOpen(true)
+            setNotifUnread(0)
+          }}
         >
-          改密
-        </button>
+          <Icon name="bell" />
+        </IconButton>
 
-        <button type="button" className="glass-btn icon-btn" title="通知">
-          🔔
-        </button>
+        <IconButton
+          label="设置"
+          title="设置"
+          onClick={() => setSettingsOpen(true)}
+        >
+          <Icon name="settings" />
+        </IconButton>
       </header>
+
+      {notifOpen && (
+        <div className="record-modal-backdrop" role="presentation" onMouseDown={() => setNotifOpen(false)}>
+          <div className="record-modal" style={{ maxWidth: 520 }} onMouseDown={e => e.stopPropagation()}>
+            <div className="record-modal__header">
+              <div className="record-modal__title-wrap">
+                <h2>通知中心</h2>
+              </div>
+              <button type="button" className="record-modal__close" aria-label="关闭" onClick={() => setNotifOpen(false)}>
+                ×
+              </button>
+            </div>
+            <div className="record-modal__body">
+              <div style={{ display: 'grid', gap: 10 }}>
+                <div className="glass-card" style={{ padding: 10 }}>
+                  <div style={{ fontSize: 13, color: 'var(--text-primary)' }}>审批提醒：你有 3 条待审批笔录</div>
+                  <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-muted)' }}>刚刚</div>
+                </div>
+                <div className="glass-card" style={{ padding: 10 }}>
+                  <div style={{ fontSize: 13, color: 'var(--text-primary)' }}>数据备份建议：建议本周执行一次手动备份</div>
+                  <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-muted)' }}>今天 09:20</div>
+                </div>
+              </div>
+            </div>
+            <div className="record-modal__footer">
+              <button type="button" className="glass-btn" onClick={() => setNotifOpen(false)}>
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {settingsOpen && (
+        <div className="record-modal-backdrop" role="presentation" onMouseDown={() => setSettingsOpen(false)}>
+          <div className="record-modal" style={{ maxWidth: 420 }} onMouseDown={e => e.stopPropagation()}>
+            <div className="record-modal__header">
+              <div className="record-modal__title-wrap">
+                <h2>设置</h2>
+              </div>
+              <button type="button" className="record-modal__close" aria-label="关闭" onClick={() => setSettingsOpen(false)}>
+                ×
+              </button>
+            </div>
+            <div className="record-modal__body">
+              <div style={{ display: 'grid', gap: 10 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  当前用户：{user.real_name || user.username}
+                </div>
+                <button type="button" className="glass-btn" onClick={onThemeToggle}>
+                  <Icon name={themeMode === 'dark' ? 'sun' : 'moon'} size={18} />
+                  {themeMode === 'dark' ? '切换为浅色模式' : '切换为深色模式'}
+                </button>
+                <button
+                  type="button"
+                  className="glass-btn"
+                  disabled={!isTauri()}
+                  onClick={openPwdFromSettings}
+                >
+                  <Icon name="key" size={18} />
+                  {isTauri() ? '修改登录密码' : '仅桌面端可用'}
+                </button>
+              </div>
+            </div>
+            <div className="record-modal__footer">
+              <button type="button" className="glass-btn" onClick={() => setSettingsOpen(false)}>
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {pwdOpen && (
         <div className="record-modal-backdrop" role="presentation" onMouseDown={() => closePwd()}>

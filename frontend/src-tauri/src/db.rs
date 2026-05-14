@@ -31,6 +31,7 @@ pub fn init(db_path: &str) -> SqlResult<()> {
     ensure_stage4_schema(&conn)?;
     ensure_stage5a_templates_schema(&conn)?;
     seed_guided_templates(&conn)?;
+    upgrade_prison_templates_to_guided_if_needed(&conn)?;
     ensure_stage5_users_schema(&conn)?;
 
     drop(conn);
@@ -182,6 +183,35 @@ fn seed_guided_templates(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
+/// 将内置四套「监狱执法谈话」模板从自由正文升级为引导式（与 init_db 种子 id/name 一致）。
+/// 仅在仍为 free_text 且未配置 guide_schema 时写入，避免覆盖用户已改模板。
+fn upgrade_prison_templates_to_guided_if_needed(conn: &Connection) -> SqlResult<()> {
+    const RT01: &str = r#"{"version":1,"questions":[{"id":"q_adm_basic","prompt":"一、人员基本情况（依档案据实填写或由其自述）","multiline":true},{"id":"q_adm_rights","prompt":"二、权利义务告知与监规纪律教育要点（申诉、控告途径；遵守监规、服从管理等）","multiline":true},{"id":"q_adm_summary","prompt":"三、谈话要点及服刑人员陈述摘要","multiline":true}],"signaturePlaceholder":"服刑人员（签名）：__________\n谈话人（签名）：__________\n记录人（签名）：__________"}"#;
+    const RT02: &str = r#"{"version":1,"questions":[{"id":"q_indiv_topic","prompt":"一、谈话事由与教育主题","multiline":true},{"id":"q_indiv_facts","prompt":"二、事实陈述与民警针对性教育内容摘要","multiline":true},{"id":"q_indiv_attitude","prompt":"三、服刑人员认识态度与表态","multiline":true}],"signaturePlaceholder":"服刑人员（签名）：__________\n谈话人（签名）：__________\n记录人（签名）：__________"}"#;
+    const RT03: &str = r#"{"version":1,"questions":[{"id":"q_escort_law","prompt":"一、法律依据与本次提押（出庭）事由说明","multiline":true},{"id":"q_escort_safety","prompt":"二、纪律与安全注意事项告知摘要","multiline":true},{"id":"q_escort_confirm","prompt":"三、服刑人员陈述与确认事项","multiline":true}],"signaturePlaceholder":"服刑人员（签名）：__________\n谈话人（签名）：__________\n记录人（签名）：__________"}"#;
+    const RT04: &str = r#"{"version":1,"questions":[{"id":"q_release_rights","prompt":"一、出监前权利义务与安置帮教衔接要点告知摘要","multiline":true},{"id":"q_release_appeals","prompt":"二、服刑人员思想动态与困难诉求摘要","multiline":true},{"id":"q_release_conclusion","prompt":"三、谈话结论与服刑人员表态","multiline":true}],"signaturePlaceholder":"服刑人员（签名）：__________\n谈话人（签名）：__________\n记录人（签名）：__________"}"#;
+
+    let rows: &[(i64, &str, &str)] = &[
+        (1, "入监谈话笔录", RT01),
+        (2, "个别教育谈话笔录", RT02),
+        (3, "提押（出庭）谈话笔录", RT03),
+        (4, "出监前谈话笔录", RT04),
+    ];
+
+    for (id, expected_name, schema) in rows {
+        conn.execute(
+            "UPDATE templates
+             SET template_kind = 'guided', guide_schema_json = ?1
+             WHERE id = ?2 AND name = ?3
+               AND deleted_at IS NULL
+               AND (template_kind IS NULL OR LOWER(TRIM(template_kind)) = 'free_text')
+               AND (guide_schema_json IS NULL OR TRIM(COALESCE(guide_schema_json, '')) = '')",
+            params![schema, id, expected_name],
+        )?;
+    }
+    Ok(())
+}
+
 fn validate_case_ref(conn: &Connection, case_id: Option<i64>) -> Result<(), String> {
     let Some(cid) = case_id.filter(|&id| id > 0) else {
         return Ok(());
@@ -299,7 +329,7 @@ fn validate_privileged_create_role(role: &str) -> Result<(), String> {
     if matches!(role.trim(), "Admin" | "Auditor") {
         Ok(())
     } else {
-        Err("特权入口仅用于创建管理员或审计员角色".into())
+        Err("授权入口仅用于创建管理员或审计员角色".into())
     }
 }
 
@@ -2027,7 +2057,7 @@ pub fn update_user(
     let prev_el = role_is_elevated(&prev_role);
     let new_el = role_is_elevated(new_r);
     if role_changed && (prev_el || new_el) && !privileged_role_edit {
-        return Err("涉及特权角色的变更须勾选特权编辑".into());
+        return Err("涉及管理员或审计员角色的变更须勾选授权编辑".into());
     }
     let uid = input.user_id.trim();
     let uname = input.username.trim();

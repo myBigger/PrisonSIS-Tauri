@@ -4,6 +4,8 @@ import type { Case, Record } from '../api'
 import { addCase, getCasesByPage, listRecordsByCase, updateCase } from '../api'
 import { formatInvokeError } from '../lib/invokeError'
 import { isTauriRuntime as isTauri } from '../lib/tauriEnv'
+import Icon from '../components/icons/Icon'
+import IconButton from '../components/icons/IconButton'
 
 const PAGE_SIZE = 15
 
@@ -13,9 +15,15 @@ const statusLabel = (s: string) =>
     closed: '已结案',
   }[s] ?? s)
 
-const statusColor = (s: string) => {
+const caseStatusDotColor = (s: string) => {
   if (s === 'closed') return 'var(--status-online)'
-  if (s === 'open') return 'var(--accent-secondary)'
+  if (s === 'open') return 'var(--case-status-open-dot)'
+  return 'var(--text-muted)'
+}
+
+const caseStatusTextColor = (s: string) => {
+  if (s === 'closed') return 'var(--status-online)'
+  if (s === 'open') return 'var(--case-status-open-text)'
   return 'var(--text-muted)'
 }
 
@@ -194,9 +202,9 @@ export default function CasesPage() {
             onKeyDown={e => e.key === 'Enter' && handleSearch()}
           />
         </div>
-        <button type="button" className="glass-btn" onClick={handleSearch} disabled={!isTauri()}>
-          搜索
-        </button>
+        <IconButton label="搜索" onClick={handleSearch} disabled={!isTauri()}>
+          <Icon name="search" />
+        </IconButton>
       </div>
 
       <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
@@ -209,7 +217,7 @@ export default function CasesPage() {
                 <th>状态</th>
                 <th>备注</th>
                 <th>创建时间</th>
-                <th>操作</th>
+                <th className="data-table__col--actions">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -234,8 +242,8 @@ export default function CasesPage() {
                     <td style={{ color: 'var(--text-primary)' }}>{c.title || '—'}</td>
                     <td>
                       <span className="cell-status">
-                        <span className="status-dot" style={{ background: statusColor(c.status) }} />
-                        <span style={{ color: statusColor(c.status) }}>{statusLabel(c.status)}</span>
+                        <span className="status-dot" style={{ background: caseStatusDotColor(c.status) }} />
+                        <span style={{ color: caseStatusTextColor(c.status) }}>{statusLabel(c.status)}</span>
                       </span>
                     </td>
                     <td style={{ color: 'var(--text-muted)', fontSize: 12, maxWidth: 220 }}>
@@ -243,8 +251,8 @@ export default function CasesPage() {
                       {(c.remark || '').length > 80 ? '…' : ''}
                     </td>
                     <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{c.created_at || '—'}</td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <td className="data-table__col--actions">
+                      <div className="table-actions">
                         <button type="button" className="glass-btn small" disabled={!isTauri()} onClick={() => openView(c)}>
                           查看
                         </button>
@@ -385,7 +393,7 @@ export default function CasesPage() {
                 <div className="record-modal__meta">标题：{viewCase.title || '—'}</div>
                 <div className="record-modal__meta" style={{ marginTop: 4 }}>
                   状态：
-                  <span style={{ color: statusColor(viewCase.status) }}>{statusLabel(viewCase.status)}</span>
+                  <span style={{ color: caseStatusTextColor(viewCase.status) }}>{statusLabel(viewCase.status)}</span>
                 </div>
                 {viewCase.remark ? (
                   <div className="record-modal__hint" style={{ marginTop: 8 }}>

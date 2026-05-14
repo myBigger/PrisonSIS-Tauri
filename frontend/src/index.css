@@ -32,6 +32,9 @@
   --status-online: #22C55E;
   --status-warning: #F59E0B;
   --status-error: #EF4444;
+  /* 案件「进行中」：列表与详情弹窗中文字 / 圆点（深色底上沿用高亮橙） */
+  --case-status-open-text: var(--accent-secondary);
+  --case-status-open-dot: var(--accent-secondary);
   --statusbar-bg: rgba(0, 0, 0, 0.22);
   --statusbar-text: var(--text-muted);
 
@@ -55,8 +58,9 @@
   --editor-toolbar-divider: rgba(255, 255, 255, 0.12);
   --editor-color-dot-default-ring: rgba(255, 255, 255, 0.32);
   --editor-color-dot-colored-ring: rgba(255, 255, 255, 0.15);
-  --input-bg: rgba(0, 0, 0, 0.30);
-  --input-border: rgba(255, 255, 255, 0.09);
+  /* 输入框（更克制的 macOS 风格） */
+  --input-bg: rgba(255, 255, 255, 0.06);
+  --input-border: rgba(255, 255, 255, 0.14);
   --editor-pane-bg: rgba(0, 0, 0, 0.20);
   --editor-flash-outline: rgba(0, 212, 170, 0.55);
   --editor-flash-bg: rgba(0, 212, 170, 0.28);
@@ -90,6 +94,9 @@
   --text-muted: rgba(15, 23, 42, 0.52);
   --statusbar-bg: rgba(255, 255, 255, 0.52);
   --statusbar-text: rgba(15, 23, 42, 0.66);
+  /* 浅底上 accent-secondary 偏亮，单独加深「进行中」可读性 */
+  --case-status-open-text: #9a3412;
+  --case-status-open-dot: #c2410c;
 
   --blur-radius: 22px;
 
@@ -107,8 +114,9 @@
   --editor-toolbar-divider: rgba(15, 23, 42, 0.14);
   --editor-color-dot-default-ring: rgba(15, 23, 42, 0.28);
   --editor-color-dot-colored-ring: rgba(15, 23, 42, 0.14);
-  --input-bg: rgba(255, 255, 255, 0.72);
-  --input-border: rgba(15, 23, 42, 0.12);
+  /* 输入框（更接近 macOS 系统设置） */
+  --input-bg: rgba(255, 255, 255, 0.88);
+  --input-border: rgba(15, 23, 42, 0.14);
   --editor-pane-bg: rgba(255, 255, 255, 0.62);
   --editor-flash-outline: rgba(0, 173, 138, 0.42);
   --editor-flash-bg: rgba(0, 173, 138, 0.16);
@@ -117,6 +125,13 @@
   --editor-flash-shadow-glow: rgba(0, 173, 138, 0.18);
   --sidebar-collapsed-logout-bg: rgba(255, 255, 255, 0.86);
   --sidebar-collapsed-logout-border: rgba(15, 23, 42, 0.18);
+
+  /* ── 浅色深度适配：层次与关键数字 ───────────────────────── */
+  --text-key: rgba(2, 132, 199, 0.95); /* 关键数字/编号/案号（偏蓝，区别深色薄荷） */
+  --text-mono: rgba(15, 23, 42, 0.88);
+  --surface-1: rgba(255, 255, 255, 0.78);
+  --surface-2: rgba(255, 255, 255, 0.62);
+  --shadow-soft: 0 10px 26px rgba(15, 23, 42, 0.10);
 }
 
 /* ── Reset & Base ────────────────────────────────────────── */
@@ -442,10 +457,30 @@ body {
   color: var(--text-muted);
 }
 
+.sidebar-footer .sidebar-logout-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .sidebar.collapsed .sidebar-footer .glass-btn.icon-btn {
   background: var(--sidebar-collapsed-logout-bg);
   border: 1px solid var(--sidebar-collapsed-logout-border);
   color: var(--text-primary);
+}
+
+.sidebar.collapsed .sidebar-footer {
+  padding: 10px 6px;
+  justify-content: center;
+  gap: 0;
+}
+
+.sidebar.collapsed .sidebar-avatar {
+  display: none;
+}
+
+.sidebar.collapsed .sidebar-footer .glass-btn.icon-btn {
+  margin: 0;
+  flex-shrink: 0;
 }
 
 /* ── 内容区 ──────────────────────────────────────────────── */
@@ -512,10 +547,10 @@ body {
   font-size: 14px;
 }
 
-/* 主题切换按钮组 */
+/* 主题切换（单按钮：深色时显示太阳→切浅色，浅色时显示月亮→切深色） */
 .theme-switcher {
   display: flex;
-  gap: 4px;
+  align-items: center;
 }
 
 /* ── 毛玻璃面板 ─────────────────────────────────────────── */
@@ -531,6 +566,12 @@ body {
   min-height: 0;
 }
 
+:root[data-theme='light-glass'] .glass-panel {
+  background: var(--surface-1);
+  border-color: rgba(15, 23, 42, 0.14);
+  box-shadow: var(--shadow-soft);
+}
+
 .glass-panel::before {
   content: '';
   position: absolute;
@@ -540,6 +581,58 @@ body {
   height: 1px;
   background: rgba(255, 255, 255, 0.08);
   border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+/* ── 面板内卡片行列表（与 .data-table 斑马纹、hover、操作列留白对齐） ── */
+.glass-panel-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.glass-panel-list__row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  padding: 9px 0 9px 12px;
+  border-bottom: 1px solid var(--glass-border);
+  transition: background-color 0.14s ease;
+}
+
+.glass-panel-list__row:nth-child(even) {
+  background: rgba(0, 0, 0, 0.10);
+}
+
+:root[data-theme='light-glass'] .glass-panel-list__row:nth-child(even) {
+  background: rgba(15, 23, 42, 0.035);
+}
+
+.glass-panel-list__row:hover {
+  background: var(--glass-bg-hover);
+}
+
+:root[data-theme='light-glass'] .glass-panel-list__row:hover {
+  background: rgba(2, 132, 199, 0.09);
+}
+
+.glass-panel-list__row-main {
+  flex: 1;
+  min-width: 0;
+  padding-right: 12px;
+}
+
+.glass-panel-list__row-actions {
+  flex-shrink: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  padding-left: 12px;
+  padding-right: 14px;
+  min-width: 0;
 }
 
 /* ── 毛玻璃按钮 ─────────────────────────────────────────── */
@@ -586,6 +679,19 @@ body {
   border-color: var(--accent-primary);
 }
 
+/* 浅色主题：主按钮用“实心高对比” */
+:root[data-theme='light-glass'] .glass-btn.primary {
+  background: #047857;
+  border: 1px solid #03654b;
+  color: rgba(255, 255, 255, 0.98);
+}
+
+:root[data-theme='light-glass'] .glass-btn.primary:hover {
+  background: #059669;
+  border-color: #047857;
+  color: rgba(255, 255, 255, 0.98);
+}
+
 .glass-btn.danger {
   background: rgba(239, 68, 68, 0.15);
   border: 1px solid rgba(239, 68, 68, 0.30);
@@ -597,6 +703,26 @@ body {
   border-color: var(--accent-red);
 }
 
+.glass-btn:disabled,
+.glass-btn[aria-disabled='true'] {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.glass-btn:disabled:hover,
+.glass-btn:disabled:active,
+.glass-btn[aria-disabled='true']:hover,
+.glass-btn[aria-disabled='true']:active {
+  background: var(--glass-bg);
+  color: var(--text-secondary);
+}
+
+.glass-btn.danger:disabled:hover,
+.glass-btn.danger:disabled:active {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--accent-red);
+}
+
 .glass-btn.icon-btn {
   width: 36px;
   height: 36px;
@@ -604,11 +730,141 @@ body {
   border-radius: 10px;
 }
 
+/* IconButton 图标全局统一尺寸 */
+.glass-btn.icon-btn > svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* 表格等密集区：小号图标按钮（与 16px 图标配套） */
+.glass-btn.icon-btn.small {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  border-radius: 8px;
+}
+
+/* 图标按钮：hover 略弱于文字按钮，更接近 macOS 工具栏 */
+.glass-btn.icon-btn:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-primary);
+}
+
+:root[data-theme='light-glass'] .glass-btn.icon-btn:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--text-primary);
+}
+
+.glass-btn.icon-btn.danger:not(:disabled):hover {
+  background: rgba(239, 68, 68, 0.22);
+  color: var(--accent-red);
+}
+
+:root[data-theme='light-glass'] .glass-btn.icon-btn.danger:not(:disabled):hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--accent-red);
+}
+
+.glass-btn.icon-btn.primary:not(:disabled) {
+  background: rgba(0, 212, 170, 0.18);
+  border: 1px solid rgba(0, 212, 170, 0.35);
+  color: var(--accent-primary);
+}
+
+.glass-btn.icon-btn.primary:not(:disabled):hover {
+  background: rgba(0, 212, 170, 0.28);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+:root[data-theme='light-glass'] .glass-btn.icon-btn.primary:not(:disabled) {
+  background: #047857;
+  border: 1px solid #03654b;
+  color: rgba(255, 255, 255, 0.98);
+}
+
+:root[data-theme='light-glass'] .glass-btn.icon-btn.primary:not(:disabled):hover {
+  background: #059669;
+  border-color: #047857;
+  color: rgba(255, 255, 255, 0.98);
+}
+
+.glass-btn.icon-btn:not(:disabled):active {
+  background: var(--glass-bg-active);
+}
+
+.glass-btn.icon-btn.primary:not(:disabled):active {
+  background: rgba(0, 212, 170, 0.22);
+}
+
+:root[data-theme='light-glass'] .glass-btn.icon-btn.primary:not(:disabled):active {
+  background: #03654b;
+}
+
+.glass-btn.icon-btn.danger:not(:disabled):active {
+  background: rgba(239, 68, 68, 0.22);
+}
+
+.glass-btn.icon-btn.primary:disabled:hover,
+.glass-btn.icon-btn.primary:disabled:active {
+  background: rgba(0, 212, 170, 0.12);
+  color: var(--accent-primary);
+}
+
+:root[data-theme='light-glass'] .glass-btn.icon-btn.primary:disabled:hover,
+:root[data-theme='light-glass'] .glass-btn.icon-btn.primary:disabled:active {
+  background: rgba(4, 120, 87, 0.35);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.glass-btn.icon-btn:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--bg-base),
+    0 0 0 4px rgba(0, 212, 170, 0.45);
+}
+
+:root[data-theme='light-glass'] .glass-btn.icon-btn:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--bg-surface),
+    0 0 0 4px rgba(0, 120, 100, 0.35);
+}
+
 .glass-btn.small {
   height: 28px;
   padding: 0 12px;
   font-size: 12px;
   border-radius: 6px;
+}
+
+/* 列表/表格操作列：多按钮强制单行横向排列（不换行竖堆） */
+.table-actions {
+  display: inline-flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+}
+
+.data-table td.data-table__col--actions .table-actions {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.glass-panel-list__row-actions .table-actions {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* ── 毛玻璃卡片 ─────────────────────────────────────────── */
@@ -682,26 +938,67 @@ body {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  padding: 10px 12px;
+  padding: 9px 12px;
   text-align: left;
+  vertical-align: middle;
   border-bottom: 1px solid var(--glass-border);
   white-space: nowrap;
 }
 
+:root[data-theme='light-glass'] .data-table th {
+  background: rgba(15, 23, 42, 0.10);
+  color: rgba(30, 41, 59, 0.88);
+  border-bottom-color: rgba(15, 23, 42, 0.16);
+}
+
 .data-table td {
-  padding: 10px 12px;
+  padding: 9px 12px;
   color: var(--text-primary);
   font-size: 13px;
+  vertical-align: middle;
   border-bottom: 1px solid rgba(255, 255, 255, 0.03);
   white-space: nowrap;
+}
+
+/* 按钮/图标操作列（显式标注，避免嵌套表、日志「操作」等业务列误对齐） */
+.data-table th.data-table__col--actions {
+  width: 1%;
+  padding-left: 12px;
+  padding-right: 12px;
+  text-align: center;
+}
+
+.data-table td.data-table__col--actions {
+  text-align: center;
+  padding-left: 12px;
+  padding-right: 14px;
+}
+
+/* .table-actions 在操作列的样式见上文「列表/表格操作列」 */
+
+:root[data-theme='light-glass'] .data-table td {
+  color: rgba(15, 23, 42, 0.90);
+  border-bottom-color: rgba(15, 23, 42, 0.08);
+}
+
+.data-table tbody tr td {
+  transition: background-color 0.14s ease;
 }
 
 .data-table tr:nth-child(even) td {
   background: rgba(0, 0, 0, 0.10);
 }
 
+:root[data-theme='light-glass'] .data-table tr:nth-child(even) td {
+  background: rgba(15, 23, 42, 0.035);
+}
+
 .data-table tr:hover td {
   background: var(--glass-bg-hover);
+}
+
+:root[data-theme='light-glass'] .data-table tr:hover td {
+  background: rgba(2, 132, 199, 0.09);
 }
 
 /* 日志审计：详情列多行折行（覆盖全局 td nowrap） */
@@ -737,6 +1034,10 @@ body {
   font-family: 'SF Mono', 'Consolas', monospace;
 }
 
+:root[data-theme='light-glass'] .data-table .cell-mono {
+  color: var(--text-key);
+}
+
 .data-table .cell-status {
   display: inline-flex;
   align-items: center;
@@ -753,21 +1054,29 @@ body {
 /* ── 输入框 ─────────────────────────────────────────────── */
 .glass-input {
   height: 38px;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--glass-border);
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
   border-radius: var(--radius-sm);
   padding: 0 14px;
   color: var(--text-primary);
   font-size: 13px;
   font-family: inherit;
   outline: none;
-  transition: border-color 0.2s, background 0.2s;
+  transition: border-color 0.2s, background-color 0.2s, box-shadow 0.2s;
   width: 100%;
 }
 
-.glass-input:focus {
+.glass-input:focus,
+.glass-input:focus-visible {
   border-color: var(--accent-primary);
-  background: rgba(0, 212, 170, 0.04);
+  background-color: var(--input-bg);
+  box-shadow: 0 0 0 3px rgba(0, 212, 170, 0.14);
+}
+
+.glass-input.glass-input--compact {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
 }
 
 .glass-input::placeholder {
@@ -782,10 +1091,65 @@ body {
   resize: vertical;
 }
 
+/* 自适应高度回答区：覆盖默认 textarea 大 min-height；禁止拖拽改高 */
+.glass-input.glass-textarea.glass-textarea--autosize {
+  min-height: 0;
+  resize: none;
+}
+
 .glass-input:disabled,
 .glass-input.glass-textarea:disabled {
   opacity: 0.65;
   cursor: not-allowed;
+}
+
+/* 引导录入：题干编辑框 vs 回答区（边框/底色区分） */
+.glass-input.glass-input--guided-prompt,
+.glass-input.glass-textarea.glass-input--guided-prompt {
+  border-color: rgba(0, 212, 170, 0.38);
+  background: rgba(0, 212, 170, 0.08);
+}
+
+.glass-input.glass-input--guided-prompt:focus,
+.glass-input.glass-input--guided-prompt:focus-visible,
+.glass-input.glass-textarea.glass-input--guided-prompt:focus,
+.glass-input.glass-textarea.glass-input--guided-prompt:focus-visible {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(0, 212, 170, 0.16);
+}
+
+.glass-input.glass-input--guided-answer,
+.glass-input.glass-textarea.glass-input--guided-answer {
+  border-color: rgba(148, 163, 184, 0.42);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.glass-input.glass-input--guided-answer:focus,
+.glass-input.glass-input--guided-answer:focus-visible,
+.glass-input.glass-textarea.glass-input--guided-answer:focus,
+.glass-input.glass-textarea.glass-input--guided-answer:focus-visible {
+  border-color: rgba(148, 163, 184, 0.75);
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.12);
+}
+
+:root[data-theme='light-glass'] .glass-input.glass-input--guided-prompt,
+:root[data-theme='light-glass'] .glass-input.glass-textarea.glass-input--guided-prompt {
+  border-color: rgba(4, 120, 87, 0.38);
+  background: rgba(4, 120, 87, 0.07);
+}
+
+:root[data-theme='light-glass'] .glass-input.glass-input--guided-answer,
+:root[data-theme='light-glass'] .glass-input.glass-textarea.glass-input--guided-answer {
+  border-color: rgba(100, 116, 139, 0.4);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+:root[data-theme='light-glass'] .glass-input.glass-input--guided-answer:focus,
+:root[data-theme='light-glass'] .glass-input.glass-input--guided-answer:focus-visible,
+:root[data-theme='light-glass'] .glass-input.glass-textarea.glass-input--guided-answer:focus,
+:root[data-theme='light-glass'] .glass-input.glass-textarea.glass-input--guided-answer:focus-visible {
+  border-color: rgba(71, 85, 105, 0.65);
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.2);
 }
 
 .glass-input--select {
@@ -800,6 +1164,16 @@ body {
 .glass-input--datetime {
   min-height: 38px;
   color-scheme: dark;
+}
+
+:root[data-theme='light-glass'] .glass-input--datetime {
+  color-scheme: light;
+}
+
+.glass-input.glass-input--search {
+  height: 36px;
+  border-radius: 8px;
+  padding: 0 12px;
 }
 
 .record-modal__hint {
@@ -1338,6 +1712,16 @@ body {
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
 }
 
+/* 待补问题：更宽 + 内部滚动，避免长题干与 record-modal overflow 裁切 */
+.record-modal__confirm-box--guided-checklist {
+  width: min(100%, 480px);
+  max-height: min(82vh, 560px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
 .record-modal__confirm-title {
   margin: 0 0 10px;
   font-size: 16px;
@@ -1356,6 +1740,58 @@ body {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+/* 待补问题清单：滚动区占满剩余高度，题干多行不裁切（不用 glass-btn，避免 inline-flex/固定高度） */
+.record-guided-checklist__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  margin-bottom: 12px;
+  padding-bottom: 6px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.record-guided-checklist__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+button.record-guided-checklist__row {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  line-height: 1.55;
+  color: var(--text-primary);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+button.record-guided-checklist__row:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-bright);
+  color: var(--text-primary);
+}
+
+button.record-guided-checklist__row:active {
+  background: var(--glass-bg-active);
 }
 
 .record-modal__header {
@@ -1460,6 +1896,230 @@ body {
   grid-column: 1 / -1;
 }
 
+/* 引导总览：未选中略暗、选中明亮（与单题任务卡一致）；题号徽章为中性灰，无绿色选中描边 */
+.record-modal__grid.record-modal__grid--guided-overview {
+  row-gap: 14px;
+  align-items: stretch;
+}
+
+.record-guided-overview-card {
+  grid-column: 1 / -1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  cursor: pointer;
+  text-align: left;
+  border: 1px solid color-mix(in srgb, var(--glass-border) 92%, var(--text-muted) 8%);
+  border-radius: 14px;
+  padding: 14px;
+  /* 未选中：整体再暗一点、压低阴影，呈「休眠」态 */
+  background: color-mix(in srgb, var(--panel-bg) 68%, #0a0f14 32%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
+  transition:
+    border-color 0.22s ease,
+    box-shadow 0.22s ease,
+    background 0.22s ease,
+    transform 0.18s cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
+.record-guided-overview-card:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--glass-border) 55%, var(--text-muted) 45%);
+  outline-offset: 2px;
+}
+
+.record-guided-overview-card textarea,
+.record-guided-overview-card input:not([type='checkbox']):not([type='radio']) {
+  cursor: text;
+}
+
+.record-guided-overview-card button,
+.record-guided-overview-card [role='button'] {
+  cursor: pointer;
+}
+
+.record-guided-overview-card__badge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.record-guided-overview-card__badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--glass-bg) 88%, var(--text-muted) 12%);
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+
+.record-guided-overview-card__hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.record-guided-overview-card .record-guided-overview-item__title-row {
+  align-items: flex-start;
+}
+
+.record-guided-overview-card .record-guided-overview-item__title {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--text-primary) 82%, var(--text-muted) 18%);
+}
+
+/* 选中：恢复明亮任务卡质感（与单题 record-task-card 一致），不用绿色描边 */
+.record-guided-overview-card--selected:not(.record-guided-overview-card--dragging) {
+  border-color: var(--glass-border);
+  background: var(--panel-bg);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.12);
+}
+
+.record-guided-overview-card--selected:not(.record-guided-overview-card--dragging)
+  .record-guided-overview-item__title {
+  color: var(--text-primary);
+}
+
+.record-guided-overview-card--selected:not(.record-guided-overview-card--dragging) .record-guided-overview-card__badge {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--glass-bg) 75%, var(--panel-bg) 25%);
+  border-color: color-mix(in srgb, var(--glass-border) 88%, var(--text-muted) 12%);
+}
+
+:root[data-theme='light-glass'] .record-guided-overview-card {
+  background: color-mix(in srgb, rgba(255, 255, 255, 0.46) 58%, rgba(15, 23, 42, 0.2) 42%);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.09);
+}
+
+:root[data-theme='light-glass'] .record-guided-overview-card__badge {
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--text-secondary);
+  border-color: color-mix(in srgb, var(--glass-border) 80%, #94a3b8 20%);
+}
+
+:root[data-theme='light-glass'] .record-guided-overview-card--selected:not(.record-guided-overview-card--dragging) {
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.09);
+}
+
+:root[data-theme='light-glass'] .record-guided-overview-card--selected:not(.record-guided-overview-card--dragging)
+  .record-guided-overview-item__title {
+  color: var(--text-primary);
+}
+
+:root[data-theme='light-glass']
+  .record-guided-overview-card--selected:not(.record-guided-overview-card--dragging)
+  .record-guided-overview-card__badge {
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--glass-border) 75%, #cbd5e1 25%);
+}
+
+.record-guided-overview-card--dragging {
+  position: relative;
+  z-index: 2;
+  border-color: color-mix(in srgb, var(--glass-border) 70%, var(--text-muted) 30%);
+  background: color-mix(in srgb, var(--panel-bg) 88%, var(--text-primary) 12%) !important;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.26) !important;
+}
+
+:root[data-theme='light-glass'] .record-guided-overview-card--dragging {
+  background: rgba(255, 255, 255, 0.92) !important;
+}
+
+.record-guided-overview-card--drop-target:not(.record-guided-overview-card--dragging) {
+  outline: 1px dashed color-mix(in srgb, var(--text-muted) 65%, transparent);
+  outline-offset: 3px;
+}
+
+/* 引导总览：题目标题与删除按钮分离，避免整块区域误触删除 */
+.record-guided-overview-item__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.record-guided-overview-item__title-block {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.record-guided-overview-item__title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.record-guided-overview-item__num {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.45;
+  color: var(--text-muted);
+  min-width: 1.6em;
+  text-align: right;
+  user-select: none;
+}
+
+.record-guided-overview-item__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+
+/* 题干内联编辑：在原标题位置直接变为输入，不再单独占一行 */
+textarea.record-guided-inline-prompt.glass-textarea {
+  min-height: 0;
+  resize: vertical;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+textarea.record-guided-inline-prompt--overview {
+  flex: 1;
+  min-width: 0;
+  min-height: 52px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+textarea.record-guided-inline-prompt--step {
+  min-height: 72px;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.record-guided-overview-item__delete {
+  flex-shrink: 0;
+}
+
+.record-guided-overview-item__actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .record-modal__criminal-strip {
   grid-column: 1 / -1;
   display: flex;
@@ -1478,6 +2138,303 @@ body {
   font-size: 14px;
 }
 
+/* ── 罪犯信息管理弹窗：查看为档案式，新建/编辑为玻璃内衬表单 ── */
+.record-modal--criminal-view {
+  max-height: min(90vh, 880px);
+}
+
+.record-modal--criminal-view .record-modal__body {
+  padding: 0 0 12px;
+  gap: 0;
+}
+
+.record-modal--criminal-form .record-modal__body,
+.record-modal--user-form .record-modal__body,
+.record-modal--template-form .record-modal__body {
+  gap: 14px;
+}
+
+.criminal-form-card,
+.user-form-card,
+.template-form-card {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  background: color-mix(in srgb, var(--glass-bg) 82%, transparent);
+  padding: 16px 18px 18px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+:root[data-theme='light-glass'] .criminal-form-card,
+:root[data-theme='light-glass'] .user-form-card,
+:root[data-theme='light-glass'] .template-form-card {
+  background: color-mix(in srgb, var(--bg-surface) 40%, var(--glass-bg) 60%);
+  box-shadow: 0 2px 14px rgba(15, 23, 42, 0.06);
+}
+
+.record-modal--criminal-form .record-modal__field > span,
+.record-modal--user-form .record-modal__field > span,
+.record-modal--template-form .record-modal__field > span {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.record-modal--template-form {
+  max-height: min(92vh, 920px);
+}
+
+.user-form-card__head,
+.template-form-card__head {
+  margin: 0 0 14px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.template-form-hint {
+  margin: -6px 0 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.template-form-hint .cell-mono {
+  font-size: 11px;
+}
+
+.user-form-privilege {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--glass-border) 75%, var(--accent-secondary) 25%);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent-secondary) 10%, transparent) 0%,
+    color-mix(in srgb, var(--glass-bg) 55%, transparent) 100%
+  );
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.user-form-privilege--edit {
+  border-color: color-mix(in srgb, var(--glass-border) 75%, var(--accent-purple) 28%);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent-purple) 9%, transparent) 0%,
+    color-mix(in srgb, var(--glass-bg) 55%, transparent) 100%
+  );
+}
+
+.user-form-privilege.user-form-privilege--elevated {
+  border-color: color-mix(in srgb, var(--accent-primary) 38%, var(--glass-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-primary) 12%, transparent);
+}
+
+.user-form-privilege input[type='checkbox'] {
+  flex-shrink: 0;
+  margin-top: 3px;
+  accent-color: var(--accent-primary);
+}
+
+.user-form-privilege > span {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.user-form-role-locked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  background: color-mix(in srgb, var(--glass-bg) 65%, transparent);
+  box-sizing: border-box;
+}
+
+.user-form-role-locked__tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.user-form-role-locked__hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.criminal-view-profile {
+  min-width: 0;
+}
+
+.criminal-view-hero {
+  padding: 18px 20px 20px;
+  border-bottom: 1px solid var(--glass-border);
+  background: linear-gradient(
+    125deg,
+    color-mix(in srgb, var(--accent-primary) 18%, transparent) 0%,
+    color-mix(in srgb, var(--glass-bg) 45%, transparent) 44%,
+    transparent 78%
+  );
+}
+
+.criminal-view-hero__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.criminal-view-hero__name {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+  line-height: 1.25;
+}
+
+.criminal-view-hero__meta {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.criminal-view-badge {
+  display: inline-block;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text-secondary);
+}
+
+.criminal-view-status {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: color-mix(in srgb, var(--glass-bg) 85%, transparent);
+}
+
+.criminal-view-status__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--status-online);
+}
+
+.criminal-view-status--archived .criminal-view-status__dot {
+  background: var(--text-muted);
+}
+
+.criminal-view-status--archived {
+  color: var(--text-muted);
+}
+
+.criminal-view-status--active {
+  color: var(--accent-primary);
+}
+
+.criminal-view-section {
+  padding: 18px 20px 4px;
+}
+
+.criminal-view-section--muted {
+  padding-top: 14px;
+  border-top: 1px dashed color-mix(in srgb, var(--glass-border) 88%, transparent);
+  margin-top: 2px;
+}
+
+.criminal-view-section__title {
+  margin: 0 0 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.criminal-view-dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 22px;
+}
+
+@media (max-width: 560px) {
+  .criminal-view-dl {
+    grid-template-columns: 1fr;
+  }
+}
+
+.criminal-view-item {
+  min-width: 0;
+}
+
+.criminal-view-item--wide {
+  grid-column: 1 / -1;
+}
+
+.criminal-view-item__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-bottom: 5px;
+}
+
+.criminal-view-item__value {
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.criminal-view-item__value--mono {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+
+.record-modal__footer--criminal-view {
+  justify-content: space-between;
+}
+
+:root[data-theme='light-glass'] .record-modal--criminal-form .record-modal__footer,
+:root[data-theme='light-glass'] .record-modal--criminal-view .record-modal__footer,
+:root[data-theme='light-glass'] .record-modal--user-form .record-modal__footer,
+:root[data-theme='light-glass'] .record-modal--template-form .record-modal__footer {
+  background: color-mix(in srgb, var(--bg-surface) 28%, transparent);
+}
+
 .record-modal__footer {
   flex-shrink: 0;
   padding: 14px 20px;
@@ -1486,6 +2443,476 @@ body {
   justify-content: flex-end;
   gap: 10px;
   background: rgba(0, 0, 0, 0.22);
+}
+
+.record-workspace-layout {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  gap: 16px;
+}
+
+.record-workspace-main {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding-right: 6px;
+}
+
+/* 引导模式：卷宗要素（模板 headerFields）— 文书式下划线 + disclosure */
+.record-guided-dossier {
+  margin: 0 0 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 252, 248, 0.04);
+}
+
+.record-guided-dossier__disclosure {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 5px 10px;
+  min-height: 30px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.record-guided-dossier__disclosure:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.record-guided-dossier__disclosure:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+
+.record-guided-dossier__title {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+
+.record-guided-dossier__count {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.record-guided-dossier__chevron {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1;
+  opacity: 0.9;
+}
+
+.record-guided-dossier__body {
+  padding: 10px 12px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.record-guided-dossier__paper {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-family: 'Songti SC', 'STSong', 'SimSun', serif;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+.record-guided-dossier__paper-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 18px 22px;
+  min-height: 1.5em;
+}
+
+.record-guided-dossier__paper-session {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.12em;
+  flex-shrink: 0;
+  cursor: text;
+  user-select: none;
+}
+
+.record-guided-dossier__paper-session > span {
+  letter-spacing: 0.02em;
+}
+
+.record-guided-dossier__paper-inline-short {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35em;
+  flex-shrink: 0;
+  max-width: 100%;
+}
+
+.record-guided-dossier__paper-label-inline {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.record-guided-dossier__paper-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  width: 100%;
+  min-width: 0;
+  cursor: text;
+}
+
+.record-guided-dossier__paper-label {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.record-guided-dossier__ink {
+  border: none;
+  border-radius: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--text-primary) 42%, transparent);
+  background: transparent;
+  padding: 2px 2px 1px;
+  margin: 0;
+  font: inherit;
+  color: var(--text-primary);
+  outline: none;
+  box-sizing: border-box;
+  min-height: 1.35em;
+  transition: border-color 0.12s ease;
+}
+
+.record-guided-dossier__ink::placeholder {
+  color: var(--text-muted);
+  opacity: 0.75;
+  font-size: 12px;
+}
+
+.record-guided-dossier__ink:hover:not(:disabled) {
+  border-bottom-color: color-mix(in srgb, var(--text-primary) 58%, transparent);
+}
+
+.record-guided-dossier__ink:focus {
+  border-bottom-color: var(--accent-primary);
+  box-shadow: 0 1px 0 0 var(--accent-primary);
+}
+
+.record-guided-dossier__ink:disabled {
+  opacity: 0.65;
+  border-bottom-style: dotted;
+  cursor: not-allowed;
+}
+
+.record-guided-dossier__ink--grow {
+  flex: 1 1 auto;
+  min-width: 3rem;
+  width: 0;
+}
+
+.record-guided-dossier__ink--narrow {
+  width: 2.75rem;
+  min-width: 2.25rem;
+  text-align: center;
+}
+
+.record-guided-dossier__ink--short {
+  width: 6rem;
+  min-width: 4rem;
+  text-align: left;
+}
+
+.record-workspace-sidebar {
+  width: 390px;
+  min-width: 340px;
+  max-width: 44%;
+  border-left: 1px solid var(--glass-border);
+  padding-left: 12px;
+  overflow: auto;
+}
+
+.record-workspace-toolbar {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.record-toolbar {
+  margin: 0 0 8px;
+}
+
+.record-toolbar__row {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.record-toolbar__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.record-toolbar__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.record-toolbar__counter {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.record-toolbar__group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.record-toolbar__group--right {
+  margin-left: auto;
+}
+
+.record-toolbar__group--icons {
+  gap: 6px;
+}
+
+/* 引导工具栏：略放大图标按钮，与 20px 图标配套 */
+.record-toolbar--actions .record-toolbar__group--icons .glass-btn.icon-btn.small,
+.record-guided-completion__actions > .glass-btn.icon-btn.small {
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  border-radius: 10px;
+}
+
+/* 单题卡 / 总览列表：引导区图标按钮统一 36×36（删除曾单独放大，编辑仍为默认 32×32 会不齐） */
+.record-task-card .glass-btn.icon-btn.small,
+.record-modal__grid .glass-btn.icon-btn.small.danger,
+.record-modal__grid .glass-btn.icon-btn.small.record-guided-overview-item__edit {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  flex-shrink: 0;
+}
+
+.record-toolbar__segmented {
+  padding: 2px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+:root[data-theme='light-glass'] .record-toolbar__segmented {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.record-toolbar__segmented .glass-btn.small {
+  min-width: 56px;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+.record-toolbar--actions {
+  margin-top: 10px;
+}
+
+.record-modal__meta--inline {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.record-modal__hint--inline {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  max-width: 56ch;
+}
+
+.record-main-topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.record-main-topbar__muted {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  flex: 1;
+  min-width: 0;
+}
+
+.record-drawer-toggle {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: var(--input-bg);
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.record-drawer-toggle:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-primary);
+}
+
+.record-settings-group {
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: var(--panel-bg);
+  padding: 10px 12px 12px;
+  margin-bottom: 12px;
+}
+
+:root[data-theme='light-glass'] .record-settings-group {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.record-settings-group__title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.record-sidebar-meta-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.record-sidebar-meta-row__k {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.record-sidebar-meta-row__v {
+  color: var(--text-primary);
+  font-weight: 600;
+  text-align: right;
+  min-width: 0;
+}
+
+.record-guided-completion {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.14);
+}
+
+:root[data-theme='light-glass'] .record-guided-completion {
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.record-guided-completion__msg {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.record-guided-completion__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.record-guided-completion__hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.record-create-preflight.record-modal__confirm-box {
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(90vh, 760px);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.record-create-preflight__scroll {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  padding-right: 4px;
+}
+
+.record-task-card {
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  padding: 14px;
+  background: var(--panel-bg);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.12);
+}
+
+:root[data-theme='light-glass'] .record-task-card {
+  background: rgba(255, 255, 255, 0.75);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
+@media (max-width: 1100px) {
+  .record-workspace-layout {
+    flex-direction: column;
+  }
+
+  .record-workspace-sidebar {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    border-left: none;
+    border-top: 1px solid var(--glass-border);
+    padding-left: 0;
+    padding-top: 12px;
+  }
+
+  .record-toolbar__row {
+    flex-wrap: wrap;
+  }
 }
 
 /* ── 全局搜索面板 ─────────────────────────────────────────── */
@@ -1624,7 +3051,7 @@ body {
 .record-picker-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 2200;
+  z-index: 14000;
   background: rgba(6, 10, 14, 0.75);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);

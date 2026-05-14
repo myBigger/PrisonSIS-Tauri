@@ -1,4 +1,4 @@
-// UsersPage.tsx — 用户管理（阶段 5：CRUD / 软删 / 特权角色）
+// UsersPage.tsx — 用户管理（阶段 5：CRUD / 软删 / Admin·Auditor 分级）
 import { useCallback, useEffect, useState } from 'react'
 import type { ManagedUserRow } from '../api'
 import {
@@ -13,6 +13,8 @@ import {
 } from '../api'
 import { formatInvokeError } from '../lib/invokeError'
 import { isTauriRuntime as isTauri } from '../lib/tauriEnv'
+import Icon from '../components/icons/Icon'
+import IconButton from '../components/icons/IconButton'
 
 const PAGE_SIZE = 15
 
@@ -317,9 +319,18 @@ export default function UsersPage() {
     }
     if (editingElevated) {
       return (
-        <div className="glass-input" style={{ opacity: 0.95 }}>
-          {roleZh(formRole)}
-          <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--text-muted)' }}>（勾选特权编辑后可调整）</span>
+        <div className="user-form-role-locked">
+          <span
+            className="user-form-role-locked__tag"
+            style={{
+              background: `${roleColor(formRole)}18`,
+              color: roleColor(formRole),
+              border: `1px solid ${roleColor(formRole)}40`,
+            }}
+          >
+            {roleZh(formRole)}
+          </span>
+          <span className="user-form-role-locked__hint">勾选「授权编辑」后可调整角色。</span>
         </div>
       )
     }
@@ -347,19 +358,40 @@ export default function UsersPage() {
       ) : null}
 
       <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--glass-border)', display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+        <div
+          style={{
+            padding: '12px 16px',
+            borderBottom: '1px solid var(--glass-border)',
+            display: 'flex',
+            flexWrap: 'nowrap',
+            gap: 12,
+            alignItems: 'center',
+            minWidth: 0,
+          }}
+        >
           <input
             className="glass-input"
-            style={{ minWidth: 200 }}
+            style={{ flex: 1, minWidth: 0 }}
             placeholder="账号 / 姓名 / 编号"
             value={searchInput}
             onChange={e => setSearchInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && applySearch()}
           />
-          <button type="button" className="glass-btn small" disabled={!isTauri()} onClick={() => applySearch()}>
-            搜索
-          </button>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-secondary)', cursor: 'pointer' }}>
+          <IconButton label="搜索" disabled={!isTauri()} onClick={() => applySearch()}>
+            <Icon name="search" />
+          </IconButton>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flexShrink: 0,
+              fontSize: 13,
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
             <input type="checkbox" checked={includeDeleted} onChange={e => setIncludeDeleted(e.target.checked)} />
             包含已删除
           </label>
@@ -377,7 +409,7 @@ export default function UsersPage() {
                 <th>岗位</th>
                 <th>创建时间</th>
                 <th>状态</th>
-                <th>操作</th>
+                <th className="data-table__col--actions">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -432,8 +464,8 @@ export default function UsersPage() {
                           </span>
                         </span>
                       </td>
-                      <td>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                      <td className="data-table__col--actions">
+                        <div className="table-actions">
                           {!deleted ? (
                             <>
                               <button type="button" className="glass-btn small" disabled={!isTauri()} onClick={() => openEdit(u)}>
@@ -462,7 +494,7 @@ export default function UsersPage() {
                               </button>
                               <button
                                 type="button"
-                                className="glass-btn small"
+                                className="glass-btn small danger"
                                 disabled={!isTauri() || u.userId.trim() === operatorUserId}
                                 title={u.userId.trim() === operatorUserId ? '不可删除当前登录账号' : ''}
                                 onClick={() => openRowActionConfirm('softDelete', u)}
@@ -526,10 +558,15 @@ export default function UsersPage() {
             setFormOpen(false)
           }}
         >
-          <div className="record-modal" style={{ maxWidth: 520 }} onMouseDown={e => e.stopPropagation()}>
+          <div className="record-modal record-modal--user-form" style={{ width: 'min(560px, 96vw)' }} onMouseDown={e => e.stopPropagation()}>
             <div className="record-modal__header">
               <div className="record-modal__title-wrap">
                 <h2>{formMode === 'create' ? '新建用户' : '编辑用户'}</h2>
+                <p className="record-modal__meta">
+                  {formMode === 'create'
+                    ? '填写编号、账号与角色；保存后即可按策略登录。'
+                    : '修改账号资料或角色后即时生效（受权限约束）。'}
+                </p>
               </div>
               <button
                 type="button"
@@ -545,7 +582,7 @@ export default function UsersPage() {
             </div>
             <div className="record-modal__body">
               {formMode === 'create' ? (
-                <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, fontSize: 13 }}>
+                <label className={`user-form-privilege${privilegedElevated ? ' user-form-privilege--elevated' : ''}`}>
                   <input
                     type="checkbox"
                     checked={privilegedElevated}
@@ -555,52 +592,61 @@ export default function UsersPage() {
                       setFormRole(v ? 'Admin' : 'User')
                     }}
                   />
-                  <span>特权新建（仅管理员 / 审计员）</span>
+                  <span>
+                    <strong style={{ color: 'var(--text-primary)' }}>授权新建</strong>
+                    仅具备系统管理权限的账号可操作：勾选后可创建管理员或审计员账号。
+                  </span>
                 </label>
               ) : (
-                <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, fontSize: 13 }}>
+                <label className={`user-form-privilege user-form-privilege--edit${privilegedRoleEdit ? ' user-form-privilege--elevated' : ''}`}>
                   <input type="checkbox" checked={privilegedRoleEdit} onChange={e => setPrivilegedRoleEdit(e.target.checked)} />
-                  <span>特权编辑（可调整特权角色）</span>
+                  <span>
+                    <strong style={{ color: 'var(--text-primary)' }}>授权编辑</strong>
+                    仅具备系统管理权限的账号可操作：勾选后可调整管理员或审计员角色。
+                  </span>
                 </label>
               )}
-              <div className="record-modal__grid">
-                <label className="record-modal__field">
-                  <span>用户编号</span>
-                  <input className="glass-input" value={formUserId} onChange={e => setFormUserId(e.target.value)} disabled={formMode === 'edit'} />
-                </label>
-                <label className="record-modal__field">
-                  <span>账号</span>
-                  <input className="glass-input" value={formUsername} onChange={e => setFormUsername(e.target.value)} />
-                </label>
-                <label className="record-modal__field record-modal__field--full">
-                  <span>姓名</span>
-                  <input className="glass-input" value={formRealName} onChange={e => setFormRealName(e.target.value)} />
-                </label>
-                <label className="record-modal__field record-modal__field--full">
-                  <span>角色</span>
-                  {renderRoleControl()}
-                </label>
-                <label className="record-modal__field">
-                  <span>部门</span>
-                  <input className="glass-input" value={formDept} onChange={e => setFormDept(e.target.value)} />
-                </label>
-                <label className="record-modal__field">
-                  <span>岗位</span>
-                  <input className="glass-input" value={formPosition} onChange={e => setFormPosition(e.target.value)} />
-                </label>
-                <label className="record-modal__field record-modal__field--full">
-                  <span>电话</span>
-                  <input className="glass-input" value={formPhone} onChange={e => setFormPhone(e.target.value)} />
-                </label>
-                {formMode === 'create' ? (
-                  <label className="record-modal__field record-modal__field--full">
-                    <span>初始密码（≥6 位）</span>
-                    <input type="password" className="glass-input" value={formPassword} onChange={e => setFormPassword(e.target.value)} autoComplete="new-password" />
+              <div className="user-form-card">
+                <div className="user-form-card__head">账户与资料</div>
+                <div className="record-modal__grid">
+                  <label className="record-modal__field">
+                    <span>用户编号</span>
+                    <input className="glass-input" value={formUserId} onChange={e => setFormUserId(e.target.value)} disabled={formMode === 'edit'} />
                   </label>
-                ) : null}
+                  <label className="record-modal__field">
+                    <span>账号</span>
+                    <input className="glass-input" value={formUsername} onChange={e => setFormUsername(e.target.value)} />
+                  </label>
+                  <label className="record-modal__field record-modal__field--full">
+                    <span>姓名</span>
+                    <input className="glass-input" value={formRealName} onChange={e => setFormRealName(e.target.value)} />
+                  </label>
+                  <label className="record-modal__field record-modal__field--full">
+                    <span>角色</span>
+                    {renderRoleControl()}
+                  </label>
+                  <label className="record-modal__field">
+                    <span>部门</span>
+                    <input className="glass-input" value={formDept} onChange={e => setFormDept(e.target.value)} />
+                  </label>
+                  <label className="record-modal__field">
+                    <span>岗位</span>
+                    <input className="glass-input" value={formPosition} onChange={e => setFormPosition(e.target.value)} />
+                  </label>
+                  <label className="record-modal__field record-modal__field--full">
+                    <span>电话</span>
+                    <input className="glass-input" value={formPhone} onChange={e => setFormPhone(e.target.value)} />
+                  </label>
+                  {formMode === 'create' ? (
+                    <label className="record-modal__field record-modal__field--full">
+                      <span>初始密码（≥6 位）</span>
+                      <input type="password" className="glass-input" value={formPassword} onChange={e => setFormPassword(e.target.value)} autoComplete="new-password" />
+                    </label>
+                  ) : null}
+                </div>
               </div>
               {formSaveError ? (
-                <p role="alert" style={{ color: 'var(--accent-red)', fontSize: 13, marginTop: 12 }}>
+                <p role="alert" style={{ color: 'var(--accent-red)', fontSize: 13, margin: 0 }}>
                   {formSaveError}
                 </p>
               ) : null}
@@ -633,23 +679,26 @@ export default function UsersPage() {
             setResetOpen(false)
           }}
         >
-          <div className="record-modal" style={{ maxWidth: 420 }} onMouseDown={e => e.stopPropagation()}>
+          <div className="record-modal record-modal--user-form" style={{ width: 'min(420px, 96vw)' }} onMouseDown={e => e.stopPropagation()}>
             <div className="record-modal__header">
               <div className="record-modal__title-wrap">
                 <h2>重置密码</h2>
-                <div className="record-modal__meta">{resetTarget.realName}（{resetTarget.userId}）</div>
+                <p className="record-modal__meta">{resetTarget.realName}（{resetTarget.userId}）</p>
               </div>
               <button type="button" className="record-modal__close" aria-label="关闭" onClick={() => setResetOpen(false)}>
                 ×
               </button>
             </div>
             <div className="record-modal__body">
-              <label className="record-modal__field record-modal__field--full">
-                <span>新密码（≥6 位）</span>
-                <input type="password" className="glass-input" value={resetPwd} onChange={e => setResetPwd(e.target.value)} autoComplete="new-password" />
-              </label>
+              <div className="user-form-card">
+                <div className="user-form-card__head">新凭据</div>
+                <label className="record-modal__field record-modal__field--full">
+                  <span>新密码（≥6 位）</span>
+                  <input type="password" className="glass-input" value={resetPwd} onChange={e => setResetPwd(e.target.value)} autoComplete="new-password" />
+                </label>
+              </div>
               {resetErr ? (
-                <p role="alert" style={{ color: 'var(--accent-red)', fontSize: 13 }}>
+                <p role="alert" style={{ color: 'var(--accent-red)', fontSize: 13, margin: 0 }}>
                   {resetErr}
                 </p>
               ) : null}

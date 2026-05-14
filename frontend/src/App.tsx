@@ -1,5 +1,5 @@
 // App.tsx — PrisonSIS Tauri 应用主入口
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import './index.css'
 import GlassSidebar, { pageAllowed } from './components/GlassSidebar'
 import GlassHeader from './components/GlassHeader'
@@ -19,6 +19,7 @@ import BackupPage from './pages/BackupPage'
 import LogsPage from './pages/LogsPage'
 import { runGlobalSearch, type GlobalSearchResultGroup } from './lib/globalSearch'
 import GlobalSearchPanel from './components/GlobalSearchPanel'
+import { RecordEditSessionProvider, useRecordEditSession } from './context/RecordEditSessionContext'
 
 interface User {
   user_id: string
@@ -63,6 +64,117 @@ export default function App() {
 
   const PageComponent = pages[currentPage] || HomePage
 
+  return (
+    <RecordEditSessionProvider>
+      <AppShell
+        currentPage={currentPage}
+        setCurrentPage={setCurrentPage}
+        sidebarVisible={sidebarVisible}
+        setSidebarVisible={setSidebarVisible}
+        themeMode={themeMode}
+        setThemeMode={setThemeMode}
+        user={user}
+        setUser={setUser}
+        globalSearchOpen={globalSearchOpen}
+        setGlobalSearchOpen={setGlobalSearchOpen}
+        globalSearchLoading={globalSearchLoading}
+        setGlobalSearchLoading={setGlobalSearchLoading}
+        globalSearchError={globalSearchError}
+        setGlobalSearchError={setGlobalSearchError}
+        globalSearchQuery={globalSearchQuery}
+        setGlobalSearchQuery={setGlobalSearchQuery}
+        globalSearchResults={globalSearchResults}
+        setGlobalSearchResults={setGlobalSearchResults}
+        PageComponent={PageComponent}
+      />
+    </RecordEditSessionProvider>
+  )
+}
+
+type AppShellProps = {
+  currentPage: string
+  setCurrentPage: (p: string) => void
+  sidebarVisible: boolean
+  setSidebarVisible: React.Dispatch<React.SetStateAction<boolean>>
+  themeMode: 'dark' | 'light'
+  setThemeMode: React.Dispatch<React.SetStateAction<'dark' | 'light'>>
+  user: User | null
+  setUser: React.Dispatch<React.SetStateAction<User | null>>
+  globalSearchOpen: boolean
+  setGlobalSearchOpen: React.Dispatch<React.SetStateAction<boolean>>
+  globalSearchLoading: boolean
+  setGlobalSearchLoading: React.Dispatch<React.SetStateAction<boolean>>
+  globalSearchError: string | null
+  setGlobalSearchError: React.Dispatch<React.SetStateAction<string | null>>
+  globalSearchQuery: string
+  setGlobalSearchQuery: React.Dispatch<React.SetStateAction<string>>
+  globalSearchResults: GlobalSearchResultGroup[]
+  setGlobalSearchResults: React.Dispatch<React.SetStateAction<GlobalSearchResultGroup[]>>
+  PageComponent: React.FC
+}
+
+function AppShell(props: AppShellProps) {
+  const {
+    currentPage,
+    setCurrentPage,
+    sidebarVisible,
+    setSidebarVisible,
+    themeMode,
+    setThemeMode,
+    user,
+    setUser,
+    globalSearchOpen,
+    setGlobalSearchOpen,
+    globalSearchLoading,
+    setGlobalSearchLoading,
+    globalSearchError,
+    setGlobalSearchError,
+    globalSearchQuery,
+    setGlobalSearchQuery,
+    globalSearchResults,
+    setGlobalSearchResults,
+    PageComponent,
+  } = props
+
+  const { guard } = useRecordEditSession()
+  const [navConfirmOpen, setNavConfirmOpen] = useState(false)
+  const [pendingPage, setPendingPage] = useState<string | null>(null)
+
+  const requestNavigate = (nextPage: string) => {
+    if (nextPage === currentPage) return
+    if (guard.blocking) {
+      setPendingPage(nextPage)
+      setNavConfirmOpen(true)
+      return
+    }
+    setCurrentPage(nextPage)
+  }
+
+  const closeNavConfirm = () => {
+    setNavConfirmOpen(false)
+    setPendingPage(null)
+  }
+
+  const discardAndLeave = () => {
+    guard.discard?.()
+    const next = pendingPage
+    closeNavConfirm()
+    if (next) setCurrentPage(next)
+  }
+
+  const saveAndLeave = async () => {
+    const next = pendingPage
+    if (!next) return
+    const ok = await guard.save?.()
+    if (!ok) {
+      // 保存失败时回到笔录继续编辑，避免确认弹窗“卡住”
+      closeNavConfirm()
+      return
+    }
+    closeNavConfirm()
+    setCurrentPage(next)
+  }
+
   const handleLoginSuccess = (loggedInUser: User) => {
     localStorage.setItem('prisonsis_user', JSON.stringify(loggedInUser))
     setUser(loggedInUser)
@@ -89,14 +201,6 @@ export default function App() {
     }
     localStorage.setItem('prisonsis_theme', themeMode)
   }, [themeMode])
-
-  const handleThemeSwitch = (next: string) => {
-    if (next === 'light') {
-      setThemeMode('light')
-      return
-    }
-    setThemeMode('dark')
-  }
 
   const handleGlobalSearch = async (query: string) => {
     const q = query.trim()
@@ -157,7 +261,7 @@ export default function App() {
         {sidebarVisible && (
           <GlassSidebar
             currentPage={currentPage}
-            onNavigate={setCurrentPage}
+            onNavigate={requestNavigate}
             user={user}
             onLogout={handleLogout}
           />
@@ -167,7 +271,8 @@ export default function App() {
           <GlassHeader
             currentPage={currentPage}
             onToggleSidebar={() => setSidebarVisible(v => !v)}
-            onThemeSwitch={handleThemeSwitch}
+            themeMode={themeMode}
+            onThemeToggle={() => setThemeMode(m => (m === 'dark' ? 'light' : 'dark'))}
             onGlobalSearch={handleGlobalSearch}
             user={user}
           />
@@ -179,6 +284,36 @@ export default function App() {
           <GlassStatusBar />
         </div>
       </div>
+      {navConfirmOpen ? (
+        <div className="record-modal-backdrop" role="presentation" onMouseDown={closeNavConfirm}>
+          <div className="record-modal" style={{ maxWidth: 520 }} onMouseDown={e => e.stopPropagation()}>
+            <div className="record-modal__header">
+              <div className="record-modal__title-wrap">
+                <h2>离开笔录制作？</h2>
+              </div>
+              <button type="button" className="record-modal__close" aria-label="关闭" onClick={closeNavConfirm}>
+                ×
+              </button>
+            </div>
+            <div className="record-modal__body">
+              <p style={{ color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+                {guard.message || '当前内容尚未保存，离开将丢失未保存内容。'}
+              </p>
+            </div>
+            <div className="record-modal__footer">
+              <button type="button" className="glass-btn" onClick={closeNavConfirm}>
+                留在笔录
+              </button>
+              <button type="button" className="glass-btn danger" onClick={discardAndLeave}>
+                放弃并离开
+              </button>
+              <button type="button" className="glass-btn primary" onClick={() => void saveAndLeave()}>
+                保存并离开
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <GlobalSearchPanel
         open={globalSearchOpen}
         loading={globalSearchLoading}

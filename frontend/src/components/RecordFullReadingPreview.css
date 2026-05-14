@@ -1,0 +1,416 @@
+/* 全文阅读 / 打印预览（叠加层内纸面区域） */
+.record-reading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+:root[data-theme='light-glass'] .record-reading-overlay {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.record-reading-topbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--panel-bg, #1a1d24);
+  border-bottom: 1px solid var(--glass-border, #333);
+}
+
+:root[data-theme='light-glass'] .record-reading-topbar {
+  background: var(--glass-bg);
+  border-bottom-color: var(--glass-border);
+  backdrop-filter: blur(var(--blur-radius));
+}
+
+.record-reading-topbar h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.record-reading-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 16px 32px;
+}
+
+.record-reading-paper {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  min-height: 60vh;
+  padding: 36px 40px 48px;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  /* 默认走主题变量；深色主题由下方 :not(light-glass) 覆盖为 Kindle 纸色 */
+  background: color-mix(in srgb, var(--bg-surface) 52%, var(--bg-gradient-mid) 48%);
+  color: var(--text-primary);
+  border: 1px solid color-mix(in srgb, var(--glass-border) 65%, transparent);
+  border-radius: 4px;
+  box-shadow: 0 8px 32px color-mix(in srgb, var(--text-primary) 10%, transparent);
+  font-family: 'Songti SC', 'SimSun', 'Georgia', serif;
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+:root[data-theme='light-glass'] .record-reading-paper {
+  /* 与程序浅灰蓝底、玻璃面板同一色谱，避免「死白」卡片 */
+  background: color-mix(in srgb, var(--bg-surface) 44%, var(--bg-gradient-mid) 56%);
+  box-shadow: 0 10px 36px rgba(15, 23, 42, 0.1);
+  border-color: color-mix(in srgb, var(--glass-border) 75%, transparent);
+}
+
+:root[data-theme='light-glass'] .record-reading-head {
+  border-bottom-color: color-mix(in srgb, var(--glass-border) 90%, #bdbdbd);
+}
+
+:root[data-theme='light-glass'] .record-reading-meta__row .k {
+  color: var(--text-secondary);
+}
+
+:root[data-theme='light-glass'] .record-reading-uv {
+  border-bottom-color: color-mix(in srgb, var(--text-primary) 22%, transparent);
+}
+
+:root[data-theme='light-glass'] .record-reading-lined__row {
+  border-bottom-color: color-mix(in srgb, var(--text-primary) 14%, transparent);
+}
+
+:root[data-theme='light-glass'] .record-reading-ending {
+  border-top-color: color-mix(in srgb, var(--glass-border) 85%, #bdbdbd);
+}
+
+.record-reading-head {
+  position: relative;
+  text-align: center;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #bdbdbd;
+}
+
+.record-reading-head__agency {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+
+.record-reading-head__title {
+  margin-top: 6px;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 6px;
+}
+
+.record-reading-head__session {
+  position: absolute;
+  right: 0;
+  top: 0;
+  max-width: 45%;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  letter-spacing: 2px;
+  text-align: right;
+}
+
+.record-reading-head__session .record-reading-uv {
+  max-width: min(12em, 100%);
+  vertical-align: baseline;
+}
+
+.record-reading-meta {
+  width: 100%;
+  min-width: 0;
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+
+.record-reading-meta__row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 6px 0;
+  width: 100%;
+  min-width: 0;
+}
+
+.record-reading-meta__row .k {
+  width: 72px;
+  flex-shrink: 0;
+  color: #1a1a1a;
+}
+
+.record-reading-uv {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 6px 2px;
+  border-bottom: 1px solid #2c2c2c;
+  box-sizing: border-box;
+}
+
+.record-reading-uv__value {
+  min-width: 0;
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 行内第一个下划线槽略多占宽，仍遵守 min-width:0 收缩 */
+.record-reading-meta__row .k + .record-reading-uv {
+  flex: 2 1 0;
+}
+
+.record-reading-approval {
+  margin: 10px 0 8px;
+  padding: 8px 10px;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.55);
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  color: #333;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.record-reading-approval .t {
+  font-weight: 700;
+}
+
+.record-reading-reject {
+  margin: 6px 0 10px;
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  color: #6b2e20;
+}
+
+.record-reading-lined {
+  margin-top: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.record-reading-lined__row {
+  min-height: 30px;
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  border-bottom: 1px solid #4b4b4b;
+  padding: 0 2px;
+}
+
+.record-reading-lined__text {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  transform: translateY(-2px);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.record-reading-ending {
+  margin-top: 14px;
+  border-top: 1px solid #bdbdbd;
+  padding-top: 10px;
+  font-size: 14px;
+}
+
+.record-reading-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 18px;
+  font-size: 14px;
+}
+
+.record-reading-banner {
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fff8e6;
+  border: 1px solid #e8d4a8;
+  color: #5c4a1a;
+  font-size: 13px;
+  font-family: system-ui, sans-serif;
+}
+
+.record-reading-banner--warn {
+  background: #fff4f0;
+  border-color: #e8c4b8;
+  color: #6b2e20;
+}
+
+.record-reading-empty {
+  color: #666;
+  font-style: italic;
+  font-family: system-ui, sans-serif;
+}
+
+:root:not([data-theme='light-glass']) .record-reading-paper {
+  /* Kindle 风格：低对比、偏暖、柔和卡纸 */
+  background: #111418;
+  color: rgba(239, 232, 220, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 12px 52px rgba(0, 0, 0, 0.55);
+}
+
+:root:not([data-theme='light-glass']) .record-reading-head {
+  border-bottom-color: rgba(239, 232, 220, 0.18);
+}
+
+:root:not([data-theme='light-glass']) .record-reading-meta__row .k {
+  color: rgba(239, 232, 220, 0.70);
+}
+
+:root:not([data-theme='light-glass']) .record-reading-uv {
+  border-bottom-color: rgba(239, 232, 220, 0.22);
+}
+
+:root:not([data-theme='light-glass']) .record-reading-lined__row {
+  border-bottom-color: rgba(239, 232, 220, 0.20);
+}
+
+:root:not([data-theme='light-glass']) .record-reading-ending {
+  border-top-color: rgba(239, 232, 220, 0.18);
+}
+
+:root:not([data-theme='light-glass']) .record-reading-approval {
+  border-color: rgba(239, 232, 220, 0.14);
+  background: rgba(239, 232, 220, 0.05);
+  color: rgba(239, 232, 220, 0.74);
+}
+
+:root:not([data-theme='light-glass']) .record-reading-reject {
+  color: rgba(242, 188, 174, 0.92);
+}
+
+:root:not([data-theme='light-glass']) .record-reading-banner {
+  background: rgba(239, 232, 220, 0.06);
+  border-color: rgba(239, 232, 220, 0.14);
+  color: rgba(239, 232, 220, 0.78);
+}
+
+:root:not([data-theme='light-glass']) .record-reading-banner--warn {
+  background: rgba(242, 188, 174, 0.08);
+  border-color: rgba(242, 188, 174, 0.18);
+  color: rgba(242, 188, 174, 0.88);
+}
+
+:root:not([data-theme='light-glass']) .record-reading-empty {
+  color: rgba(239, 232, 220, 0.52);
+}
+
+@media print {
+  /*
+   * 点击纸面「打印」时会给 body 加上 record-reading-print-active，
+   * 打印预览中只显示 .record-reading-overlay，避免笔录制作弹窗、侧栏等一并输出。
+   */
+  body.record-reading-print-active * {
+    visibility: hidden !important;
+  }
+
+  body.record-reading-print-active .record-reading-overlay,
+  body.record-reading-print-active .record-reading-overlay * {
+    visibility: visible !important;
+  }
+
+  body.record-reading-print-active .record-reading-overlay {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    min-height: 100% !important;
+    background: #fff !important;
+    z-index: 0 !important;
+  }
+
+  .record-reading-overlay {
+    position: static;
+    background: white;
+  }
+
+  .record-reading-topbar {
+    display: none !important;
+  }
+
+  .record-reading-scroll {
+    padding: 0;
+    overflow: visible;
+  }
+
+  .record-reading-paper {
+    box-shadow: none;
+    max-width: none;
+    width: auto;
+    min-height: auto;
+    padding: 12mm;
+    border-radius: 0;
+    overflow-x: visible;
+    border: none;
+    background: #fff;
+    color: #1a1a1a;
+  }
+
+  .record-reading-head {
+    border-bottom-color: #bdbdbd;
+  }
+
+  .record-reading-meta__row .k {
+    color: #1a1a1a;
+  }
+
+  .record-reading-uv {
+    border-bottom-color: #2c2c2c;
+  }
+
+  .record-reading-lined__row {
+    border-bottom-color: #4b4b4b;
+  }
+
+  .record-reading-ending {
+    border-top-color: #bdbdbd;
+  }
+
+  .record-reading-approval {
+    border-color: #d0d0d0;
+    background: rgba(255, 255, 255, 0.55);
+    color: #333;
+  }
+
+  .record-reading-reject {
+    color: #6b2e20;
+  }
+
+  .record-reading-banner {
+    background: #fff8e6;
+    border-color: #e8d4a8;
+    color: #5c4a1a;
+  }
+
+  .record-reading-banner--warn {
+    background: #fff4f0;
+    border-color: #e8c4b8;
+    color: #6b2e20;
+  }
+
+  .record-reading-empty {
+    color: #666;
+  }
+}

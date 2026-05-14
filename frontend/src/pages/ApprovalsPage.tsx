@@ -176,7 +176,7 @@ export default function ApprovalsPage() {
             待审批 ({pending.length})
           </h2>
         </div>
-        <div style={{ flex: 1, overflow: 'auto' }}>
+        <div className="glass-panel-list">
           {loading && (
             <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 48 }}>加载中…</div>
           )}
@@ -185,17 +185,8 @@ export default function ApprovalsPage() {
           )}
           {!loading &&
             pending.map(r => (
-              <div
-                key={r.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 16,
-                  padding: '14px 16px',
-                  borderBottom: '1px solid var(--glass-border)',
-                }}
-              >
-                <div style={{ flex: 1 }}>
+              <div key={r.id} className="glass-panel-list__row">
+                <div className="glass-panel-list__row-main">
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                     <span className="cell-mono" style={{ fontSize: 12 }}>
                       {r.record_id}
@@ -211,31 +202,28 @@ export default function ApprovalsPage() {
                     提交时间：{r.created_at || '—'}
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                  <button
-                    type="button"
-                    className="glass-btn primary small"
-                    disabled={!isTauri() || actionId != null}
-                    onClick={() => handleApprove(r.id)}
-                  >
-                    通过
-                  </button>
-                  <button
-                    type="button"
-                    className="glass-btn danger small"
-                    disabled={!isTauri() || actionId != null}
-                    onClick={() => openReject(r.id)}
-                  >
-                    驳回
-                  </button>
-                  <button
-                    type="button"
-                    className="glass-btn small"
-                    disabled={!isTauri()}
-                    onClick={() => openView(r.id)}
-                  >
-                    查看
-                  </button>
+                <div className="glass-panel-list__row-actions">
+                  <div className="table-actions">
+                    <button
+                      type="button"
+                      className="glass-btn primary small"
+                      disabled={!isTauri() || actionId != null}
+                      onClick={() => handleApprove(r.id)}
+                    >
+                      通过
+                    </button>
+                    <button
+                      type="button"
+                      className="glass-btn danger small"
+                      disabled={!isTauri() || actionId != null}
+                      onClick={() => openReject(r.id)}
+                    >
+                      驳回
+                    </button>
+                    <button type="button" className="glass-btn small" disabled={!isTauri()} onClick={() => openView(r.id)}>
+                      查看
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}

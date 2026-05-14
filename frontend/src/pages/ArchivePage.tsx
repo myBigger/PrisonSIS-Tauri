@@ -4,6 +4,8 @@ import type { Criminal } from '../api'
 import { archiveCriminal, getArchiveCriminalsByPage, unarchiveCriminal } from '../api'
 import { formatInvokeError } from '../lib/invokeError'
 import { isTauriRuntime as isTauri } from '../lib/tauriEnv'
+import Icon from '../components/icons/Icon'
+import IconButton from '../components/icons/IconButton'
 
 type Tab = 'active' | 'archived'
 const PAGE_SIZE = 20
@@ -140,16 +142,15 @@ export default function ArchivePage() {
             }}
           />
         </div>
-        <button
-          type="button"
-          className="glass-btn"
+        <IconButton
+          label="搜索"
           onClick={() => {
             setAppliedSearch(searchInput.trim())
             setPage(0)
           }}
         >
-          搜索
-        </button>
+          <Icon name="search" />
+        </IconButton>
       </div>
 
       <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
@@ -162,7 +163,7 @@ export default function ArchivePage() {
                 <th>罪名</th>
                 <th>入监日期</th>
                 <th>状态</th>
-                <th>操作</th>
+                <th className="data-table__col--actions">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -198,27 +199,24 @@ export default function ArchivePage() {
                         </span>
                       </span>
                     </td>
-                    <td>
-                      {c.archived ? (
-                        <button
-                          type="button"
-                          className="glass-btn small"
-                          disabled={!isAdmin || actingId === c.id}
-                          title={!isAdmin ? '仅管理员可取消归档' : undefined}
-                          onClick={() => onUnarchive(c.id)}
-                        >
-                          取消归档
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="glass-btn small"
-                          disabled={actingId === c.id}
-                          onClick={() => onArchive(c.id)}
-                        >
-                          归档
-                        </button>
-                      )}
+                    <td className="data-table__col--actions">
+                      <div className="table-actions">
+                        {c.archived ? (
+                          <button
+                            type="button"
+                            className="glass-btn small"
+                            disabled={!isAdmin || actingId === c.id}
+                            title={!isAdmin ? '仅管理员可取消归档' : undefined}
+                            onClick={() => onUnarchive(c.id)}
+                          >
+                            取消归档
+                          </button>
+                        ) : (
+                          <button type="button" className="glass-btn small" disabled={actingId === c.id} onClick={() => onArchive(c.id)}>
+                            归档
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

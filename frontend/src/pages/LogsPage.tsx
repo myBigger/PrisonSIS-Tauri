@@ -11,6 +11,8 @@ import {
   normalizeLogSearchKeyword,
 } from '../lib/logI18n'
 import { isTauriRuntime as isTauri } from '../lib/tauriEnv'
+import Icon from '../components/icons/Icon'
+import IconButton from '../components/icons/IconButton'
 
 const actionColor = (a: string) => {
   if (a.includes('登录') || a.includes('登出')) return 'var(--accent-primary)'
@@ -218,15 +220,15 @@ export default function LogsPage() {
           <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>结束日期</span>
           <input type="date" className="glass-input" value={endDate} onChange={e => setEndDate(e.target.value)} />
         </label>
-        <button
-          className="glass-btn"
+        <IconButton
+          label="搜索"
           onClick={() => {
             setAppliedSearch(searchInput.trim())
             setPage(0)
           }}
         >
-          搜索
-        </button>
+          <Icon name="search" />
+        </IconButton>
       </div>
 
       <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>

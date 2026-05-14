@@ -187,7 +187,7 @@ export interface Template {
   name: string
   category: string
   content: string
-  template_kind: 'free_text' | 'guided'
+  template_kind: 'guided'
   guide_schema_json: string
   created_at: string
   deleted_at?: string
@@ -197,7 +197,7 @@ export interface TemplateInput {
   name: string
   category?: string
   content?: string
-  template_kind?: 'free_text' | 'guided'
+  template_kind?: 'guided'
   guide_schema_json?: string
 }
 

@@ -1,9 +1,8 @@
 // CriminalListPage.tsx — 罪犯信息列表页
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, type ReactNode } from 'react'
 import { addCriminal, getCriminalsByPage, updateCriminal } from '../api'
 import type { Criminal } from '../api'
 import { formatInvokeError } from '../lib/invokeError'
-
 const PAGE_SIZE = 20
 
 // 检测是否运行在 Tauri 环境
@@ -33,6 +32,103 @@ const DISTRICT_OPTIONS = [
   '十五监区',
   '十六监区',
 ] as const
+
+function dashText(v: string | number | null | undefined): string {
+  if (v === null || v === undefined) return '—'
+  const s = typeof v === 'number' ? String(v) : v.trim()
+  return s ? s : '—'
+}
+
+function CriminalViewProfile({
+  c,
+  normalizeEntryDate,
+}: {
+  c: Criminal
+  normalizeEntryDate: (raw: string) => string
+}) {
+  const entryRaw = normalizeEntryDate(c.entry_date || '')
+  const entryDisplay = entryRaw ? entryRaw.replace(/-/g, '/') : '—'
+  const sentenceParts: string[] = []
+  if (c.sentence_years > 0) sentenceParts.push(`${c.sentence_years} 年`)
+  if (c.sentence_months > 0) sentenceParts.push(`${c.sentence_months} 月`)
+  const sentence = sentenceParts.length > 0 ? sentenceParts.join(' ') : '—'
+
+  const Row = ({ label, children, wide, mono }: { label: string; children: ReactNode; wide?: boolean; mono?: boolean }) => (
+    <div className={`criminal-view-item${wide ? ' criminal-view-item--wide' : ''}`}>
+      <div className="criminal-view-item__label">{label}</div>
+      <div className={`criminal-view-item__value${mono ? ' criminal-view-item__value--mono' : ''}`}>{children}</div>
+    </div>
+  )
+
+  const extraBits = [
+    c.case_number?.trim(),
+    c.remark?.trim(),
+    c.handler_id?.trim(),
+    c.birth_date?.trim(),
+    c.native_place?.trim(),
+    c.education?.trim(),
+    c.original_court?.trim(),
+    (c.manage_level || '').trim() && (c.manage_level || '').trim() !== '普通' ? c.manage_level : '',
+  ].some(Boolean)
+
+  return (
+    <div className="criminal-view-profile">
+      <div className="criminal-view-hero">
+        <div className="criminal-view-hero__top">
+          <div className="criminal-view-hero__name">{dashText(c.name)}</div>
+          <div className={`criminal-view-status criminal-view-status--${c.archived ? 'archived' : 'active'}`}>
+            <span className="criminal-view-status__dot" />
+            {c.archived ? '归档' : '在押'}
+          </div>
+        </div>
+        <div className="criminal-view-hero__meta">
+          <span className="criminal-view-badge">{dashText(c.criminal_id)}</span>
+        </div>
+      </div>
+
+      <div className="criminal-view-section">
+        <h3 className="criminal-view-section__title">基本信息</h3>
+        <div className="criminal-view-dl">
+          <Row label="性别">{dashText(c.gender)}</Row>
+          <Row label="民族">{dashText(c.ethnicity)}</Row>
+          <Row label="身份证号" wide mono>
+            {dashText(c.id_card_number)}
+          </Row>
+          <Row label="案由 / 罪名">{dashText(c.crime)}</Row>
+          <Row label="类型">{dashText(c.crime_type)}</Row>
+        </div>
+      </div>
+
+      <div className="criminal-view-section">
+        <h3 className="criminal-view-section__title">在押与刑期</h3>
+        <div className="criminal-view-dl">
+          <Row label="监区">{dashText(c.district)}</Row>
+          <Row label="仓号">{dashText(c.cell)}</Row>
+          <Row label="入监日期">{entryDisplay}</Row>
+          <Row label="刑期">{sentence}</Row>
+        </div>
+      </div>
+
+      {extraBits ? (
+        <div className="criminal-view-section criminal-view-section--muted">
+          <h3 className="criminal-view-section__title">其它档案</h3>
+          <div className="criminal-view-dl">
+            <Row label="案件编号">{dashText(c.case_number)}</Row>
+            <Row label="管理等级">{dashText(c.manage_level)}</Row>
+            <Row label="承办人标识">{dashText(c.handler_id)}</Row>
+            <Row label="出生日期">{dashText(c.birth_date)}</Row>
+            <Row label="籍贯">{dashText(c.native_place)}</Row>
+            <Row label="文化程度">{dashText(c.education)}</Row>
+            <Row label="原判法院">{dashText(c.original_court)}</Row>
+            <Row label="备注" wide>
+              {c.remark?.trim() ? c.remark : '—'}
+            </Row>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
 
 const EMPTY_DRAFT: CriminalDraft = {
   criminal_id: '',
@@ -329,7 +425,7 @@ export default function CriminalListPage() {
                 <th>监区</th>
                 <th>仓号</th>
                 <th>状态</th>
-                <th>操作</th>
+                <th className="data-table__col--actions">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -370,12 +466,12 @@ export default function CriminalListPage() {
                       <span style={{ color: statusColor(c.archived) }}>{c.archived ? '归档' : '在押'}</span>
                     </span>
                   </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button className="glass-btn small" onClick={() => openView(c)}>
+                  <td className="data-table__col--actions">
+                    <div className="table-actions">
+                      <button type="button" className="glass-btn small" onClick={() => openView(c)}>
                         查看
                       </button>
-                      <button className="glass-btn small" disabled={!isTauri()} onClick={() => openEdit(c)}>
+                      <button type="button" className="glass-btn small" disabled={!isTauri()} onClick={() => openEdit(c)}>
                         编辑
                       </button>
                     </div>
@@ -400,10 +496,20 @@ export default function CriminalListPage() {
 
       {(showCreate || showEdit || showView) && (
         <div className="record-modal-backdrop" role="presentation" style={{ zIndex: 2400 }}>
-          <div className="record-modal" style={{ width: 'min(760px, 96vw)' }}>
+          <div
+            className={`record-modal ${showView && editing ? 'record-modal--criminal-view' : 'record-modal--criminal-form'}`}
+            style={{ width: 'min(760px, 96vw)' }}
+          >
             <div className="record-modal__header">
               <div className="record-modal__title-wrap">
-                <h2>{showCreate ? '新增人员' : showEdit ? '编辑人员' : '查看人员'}</h2>
+                <h2>{showCreate ? '新增人员' : showEdit ? '编辑人员' : '人员档案'}</h2>
+                {showView && editing ? (
+                  <p className="record-modal__meta">只读浏览，修改请点右下角「编辑」</p>
+                ) : showCreate ? (
+                  <p className="record-modal__meta">录入在押人员基本信息</p>
+                ) : (
+                  <p className="record-modal__meta">{editing ? `正在编辑：${editing.name || '—'}` : ''}</p>
+                )}
               </div>
               <button
                 type="button"
@@ -422,159 +528,200 @@ export default function CriminalListPage() {
               </button>
             </div>
             <div className="record-modal__body">
-              {formError && <p style={{ color: 'var(--accent-secondary)', fontSize: 13 }}>{formError}</p>}
-              <div className="record-modal__grid">
-                <label className="record-modal__field">
-                  <span>编号 *</span>
-                  <input
-                    className="glass-input"
-                    value={showView ? editing?.criminal_id ?? '' : form.criminal_id}
-                    disabled={showView || submitLoading}
-                    onChange={e => setField('criminal_id', e.target.value)}
-                  />
-                </label>
-                <label className="record-modal__field">
-                  <span>姓名 *</span>
-                  <input
-                    className="glass-input"
-                    value={showView ? editing?.name ?? '' : form.name}
-                    disabled={showView || submitLoading}
-                    onChange={e => setField('name', e.target.value)}
-                  />
-                </label>
-                <label className="record-modal__field">
-                  <span>性别</span>
-                  <select
-                    className="glass-input glass-input--select"
-                    value={showView ? editing?.gender ?? '' : form.gender}
-                    disabled={showView || submitLoading}
-                    onChange={e => setField('gender', e.target.value)}
-                  >
-                    <option value="">未填写</option>
-                    {GENDER_OPTIONS.map(g => (
-                      <option key={g} value={g}>
-                        {g}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="record-modal__field">
-                  <span>民族</span>
-                  <input
-                    className="glass-input"
-                    value={showView ? editing?.ethnicity ?? '' : form.ethnicity}
-                    disabled={showView || submitLoading}
-                    onChange={e => setField('ethnicity', e.target.value)}
-                  />
-                </label>
-                <label className="record-modal__field">
-                  <span>身份证号</span>
-                  <input
-                    className="glass-input"
-                    value={showView ? editing?.id_card_number ?? '' : form.id_card_number}
-                    disabled={showView || submitLoading}
-                    onChange={e => setField('id_card_number', e.target.value)}
-                  />
-                </label>
-                <label className="record-modal__field">
-                  <span>案由</span>
-                  <input
-                    className="glass-input"
-                    value={showView ? editing?.crime ?? '' : form.crime}
-                    disabled={showView || submitLoading}
-                    onChange={e => setField('crime', e.target.value)}
-                  />
-                </label>
-                <label className="record-modal__field">
-                  <span>类型</span>
-                  <input
-                    className="glass-input"
-                    value={showView ? editing?.crime_type ?? '' : form.crime_type}
-                    disabled={showView || submitLoading}
-                    onChange={e => setField('crime_type', e.target.value)}
-                  />
-                </label>
-                <label className="record-modal__field">
-                  <span>监区</span>
-                  <select
-                    className="glass-input glass-input--select"
-                    value={showView ? editing?.district ?? '' : form.district}
-                    disabled={showView || submitLoading}
-                    onChange={e => setField('district', e.target.value)}
-                  >
-                    <option value="">未填写</option>
-                    {DISTRICT_OPTIONS.map(d => (
-                      <option key={d} value={d}>
-                        {d}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="record-modal__field">
-                  <span>仓号</span>
-                  <input
-                    className="glass-input"
-                    value={showView ? editing?.cell ?? '' : form.cell}
-                    disabled={showView || submitLoading}
-                    onChange={e => setField('cell', e.target.value)}
-                  />
-                </label>
-                <label className="record-modal__field">
-                  <span>入监日期</span>
-                  <input
-                    type="date"
-                    className="glass-input"
-                    value={normalizeEntryDate(showView ? editing?.entry_date ?? '' : form.entry_date)}
-                    disabled={showView || submitLoading}
-                    onChange={e => setField('entry_date', e.target.value)}
-                  />
-                </label>
-                <label className="record-modal__field">
-                  <span>刑期（年）</span>
-                  <input
-                    type="number"
-                    className="glass-input"
-                    value={showView ? editing?.sentence_years ?? 0 : form.sentence_years}
-                    disabled={showView || submitLoading}
-                    onChange={e => setField('sentence_years', Math.max(0, Number(e.target.value || 0)))}
-                  />
-                </label>
-                <label className="record-modal__field">
-                  <span>刑期（月）</span>
-                  <input
-                    type="number"
-                    className="glass-input"
-                    value={showView ? editing?.sentence_months ?? 0 : form.sentence_months}
-                    disabled={showView || submitLoading}
-                    onChange={e => setField('sentence_months', Math.max(0, Number(e.target.value || 0)))}
-                  />
-                </label>
-              </div>
-            </div>
-            <div className="record-modal__footer">
-              <button
-                type="button"
-                className="glass-btn"
-                disabled={submitLoading}
-                onClick={() => {
-                  setShowCreate(false)
-                  setShowEdit(false)
-                  setShowView(false)
-                  setEditing(null)
-                  resetForm()
-                }}
-              >
-                {showView ? '关闭' : '取消'}
-              </button>
-              {showCreate && (
-                <button type="button" className="glass-btn primary" disabled={submitLoading} onClick={() => void submitCreate()}>
-                  {submitLoading ? '提交中...' : '保存'}
-                </button>
+              {showView && editing ? (
+                <CriminalViewProfile c={editing} normalizeEntryDate={normalizeEntryDate} />
+              ) : (
+                <>
+                  {formError && <p style={{ color: 'var(--accent-secondary)', fontSize: 13 }}>{formError}</p>}
+                  <div className="criminal-form-card">
+                    <div className="record-modal__grid">
+                      <label className="record-modal__field">
+                        <span>编号 *</span>
+                        <input
+                          className="glass-input"
+                          value={form.criminal_id}
+                          disabled={submitLoading}
+                          onChange={e => setField('criminal_id', e.target.value)}
+                        />
+                      </label>
+                      <label className="record-modal__field">
+                        <span>姓名 *</span>
+                        <input
+                          className="glass-input"
+                          value={form.name}
+                          disabled={submitLoading}
+                          onChange={e => setField('name', e.target.value)}
+                        />
+                      </label>
+                      <label className="record-modal__field">
+                        <span>性别</span>
+                        <select
+                          className="glass-input glass-input--select"
+                          value={form.gender}
+                          disabled={submitLoading}
+                          onChange={e => setField('gender', e.target.value)}
+                        >
+                          <option value="">未填写</option>
+                          {GENDER_OPTIONS.map(g => (
+                            <option key={g} value={g}>
+                              {g}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="record-modal__field">
+                        <span>民族</span>
+                        <input
+                          className="glass-input"
+                          value={form.ethnicity}
+                          disabled={submitLoading}
+                          onChange={e => setField('ethnicity', e.target.value)}
+                        />
+                      </label>
+                      <label className="record-modal__field">
+                        <span>身份证号</span>
+                        <input
+                          className="glass-input"
+                          value={form.id_card_number}
+                          disabled={submitLoading}
+                          onChange={e => setField('id_card_number', e.target.value)}
+                        />
+                      </label>
+                      <label className="record-modal__field">
+                        <span>案由</span>
+                        <input
+                          className="glass-input"
+                          value={form.crime}
+                          disabled={submitLoading}
+                          onChange={e => setField('crime', e.target.value)}
+                        />
+                      </label>
+                      <label className="record-modal__field">
+                        <span>类型</span>
+                        <input
+                          className="glass-input"
+                          value={form.crime_type}
+                          disabled={submitLoading}
+                          onChange={e => setField('crime_type', e.target.value)}
+                        />
+                      </label>
+                      <label className="record-modal__field">
+                        <span>监区</span>
+                        <select
+                          className="glass-input glass-input--select"
+                          value={form.district}
+                          disabled={submitLoading}
+                          onChange={e => setField('district', e.target.value)}
+                        >
+                          <option value="">未填写</option>
+                          {DISTRICT_OPTIONS.map(d => (
+                            <option key={d} value={d}>
+                              {d}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="record-modal__field">
+                        <span>仓号</span>
+                        <input
+                          className="glass-input"
+                          value={form.cell}
+                          disabled={submitLoading}
+                          onChange={e => setField('cell', e.target.value)}
+                        />
+                      </label>
+                      <label className="record-modal__field">
+                        <span>入监日期</span>
+                        <input
+                          type="date"
+                          className="glass-input"
+                          value={normalizeEntryDate(form.entry_date)}
+                          disabled={submitLoading}
+                          onChange={e => setField('entry_date', e.target.value)}
+                        />
+                      </label>
+                      <label className="record-modal__field">
+                        <span>刑期（年）</span>
+                        <input
+                          type="number"
+                          className="glass-input"
+                          value={form.sentence_years}
+                          disabled={submitLoading}
+                          onChange={e => setField('sentence_years', Math.max(0, Number(e.target.value || 0)))}
+                        />
+                      </label>
+                      <label className="record-modal__field">
+                        <span>刑期（月）</span>
+                        <input
+                          type="number"
+                          className="glass-input"
+                          value={form.sentence_months}
+                          disabled={submitLoading}
+                          onChange={e => setField('sentence_months', Math.max(0, Number(e.target.value || 0)))}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </>
               )}
-              {showEdit && (
-                <button type="button" className="glass-btn primary" disabled={submitLoading} onClick={() => void submitEdit()}>
-                  {submitLoading ? '提交中...' : '保存'}
-                </button>
+            </div>
+            <div
+              className={`record-modal__footer${showView && editing ? ' record-modal__footer--criminal-view' : ''}`}
+            >
+              {showView && editing ? (
+                <>
+                  <button
+                    type="button"
+                    className="glass-btn"
+                    disabled={submitLoading}
+                    onClick={() => {
+                      setShowView(false)
+                      setEditing(null)
+                      resetForm()
+                    }}
+                  >
+                    关闭
+                  </button>
+                  <button
+                    type="button"
+                    className="glass-btn primary"
+                    disabled={!isTauri() || submitLoading}
+                    onClick={() => {
+                      const row = editing
+                      setShowView(false)
+                      openEdit(row)
+                    }}
+                  >
+                    编辑
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="glass-btn"
+                    disabled={submitLoading}
+                    onClick={() => {
+                      setShowCreate(false)
+                      setShowEdit(false)
+                      setShowView(false)
+                      setEditing(null)
+                      resetForm()
+                    }}
+                  >
+                    取消
+                  </button>
+                  {showCreate && (
+                    <button type="button" className="glass-btn primary" disabled={submitLoading} onClick={() => void submitCreate()}>
+                      {submitLoading ? '提交中...' : '保存'}
+                    </button>
+                  )}
+                  {showEdit && (
+                    <button type="button" className="glass-btn primary" disabled={submitLoading} onClick={() => void submitEdit()}>
+                      {submitLoading ? '提交中...' : '保存'}
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>

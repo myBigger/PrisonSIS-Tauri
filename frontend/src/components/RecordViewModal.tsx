@@ -4,7 +4,7 @@ import { getRecordById } from '../api'
 import { dbDateTimeToLocalValue } from '../lib/recordFormUtils'
 import { formatInvokeError } from '../lib/invokeError'
 import { isTauriRuntime as isTauri } from '../lib/tauriEnv'
-import RecordRichTextEditor from './RecordRichTextEditor'
+import RecordFullReadingPreview from './RecordFullReadingPreview'
 
 function statusLabel(value: string): string {
   const v = (value || '').trim()
@@ -90,80 +90,66 @@ export default function RecordViewModal(props: {
 
   if (!open) return null
 
-  return (
-    <div
-      className="record-modal-backdrop"
-      role="presentation"
-      style={{ zIndex }}
-      onMouseDown={onClose}
-    >
-      <div className="record-modal" onMouseDown={e => e.stopPropagation()}>
-        <div className="record-modal__header">
-          <div className="record-modal__title-wrap">
-            <h2>查看笔录</h2>
-            {current && <div className="record-modal__meta">编号：{current.record_id}</div>}
+  if (loading || !current) {
+    return (
+      <div
+        className="record-modal-backdrop"
+        role="presentation"
+        style={{ zIndex }}
+        onMouseDown={onClose}
+      >
+        <div className="record-modal" onMouseDown={e => e.stopPropagation()}>
+          <div className="record-modal__header">
+            <div className="record-modal__title-wrap">
+              <h2>查看笔录</h2>
+            </div>
+            <button type="button" className="record-modal__close" aria-label="关闭" onClick={onClose}>
+              ×
+            </button>
           </div>
-          <button type="button" className="record-modal__close" aria-label="关闭" onClick={onClose}>
-            ×
-          </button>
-        </div>
-
-        {loading || !current ? (
           <div className="record-modal__body">
             <p style={{ color: 'var(--text-muted)' }}>{loading ? '加载中…' : '暂无数据'}</p>
           </div>
-        ) : (
-          <div className="record-modal__body" style={{ maxHeight: '70vh', overflow: 'auto' }}>
-            <div className="record-modal__section-title">基本信息</div>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 8px' }}>
-              服刑人员：{current.criminal_name || '—'} · 类型：{current.record_type}
-            </p>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 8px' }}>
-              谈话时间：{dbDateTimeToLocalValue(current.record_date) || '—'} · 地点：{current.record_location || '—'}
-            </p>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 8px' }}>
-              关联案件（案号）：{current.case_number?.trim() ? current.case_number : '—'}
-            </p>
-            {showApprovalInfo && (
-              <>
-                <div className="record-modal__section-title" style={{ marginTop: 16 }}>
-                  审批信息
-                </div>
-                <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 8px' }}>
-                  状态：{statusLabel(current.status)}
-                </p>
-                <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 8px' }}>
-                  一级审批人：{current.approver1_id || '—'} · 一级结果：{approvalResultLabel(current.approver1_result)}
-                </p>
-                <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 8px' }}>
-                  二级审批人：{current.approver2_id || '—'} · 二级结果：{approvalResultLabel(current.approver2_result)}
-                </p>
-              </>
-            )}
-            {showRejectReason && current.reject_reason?.trim() && (
-              <>
-                <div className="record-modal__section-title" style={{ marginTop: 16 }}>
-                  驳回理由
-                </div>
-                <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 8px' }}>
-                  {current.reject_reason}
-                </p>
-              </>
-            )}
-            <div className="record-modal__section-title" style={{ marginTop: 16 }}>
-              正文
-            </div>
-            <RecordRichTextEditor value={current.content || ''} editable={false} onChange={() => {}} />
+          <div className="record-modal__footer">
+            <button type="button" className="glass-btn" onClick={onClose}>
+              关闭
+            </button>
           </div>
-        )}
-
-        <div className="record-modal__footer">
-          <button type="button" className="glass-btn" onClick={onClose}>
-            关闭
-          </button>
         </div>
       </div>
-    </div>
+    )
+  }
+
+  return (
+    <RecordFullReadingPreview
+      open
+      onClose={onClose}
+      headerTitle="查看笔录"
+      zIndex={zIndex}
+      viewMode="recordReadonly"
+      readOnly
+      recordType={current.record_type || ''}
+      content={current.content || ''}
+      recordId={current.record_id || ''}
+      criminalName={current.criminal_name || ''}
+      recordDate={dbDateTimeToLocalValue(current.record_date) || ''}
+      recordLocation={current.record_location || ''}
+      interrogatorId={current.interrogator_id || ''}
+      recorderId={current.recorder_id || ''}
+      caseNumber={current.case_number?.trim() ? current.case_number : ''}
+      approvalInfo={
+        showApprovalInfo
+          ? {
+              statusLabel: statusLabel(current.status),
+              approver1Id: current.approver1_id || '',
+              approver1Result: approvalResultLabel(current.approver1_result),
+              approver2Id: current.approver2_id || '',
+              approver2Result: approvalResultLabel(current.approver2_result),
+            }
+          : undefined
+      }
+      rejectReason={showRejectReason ? current.reject_reason || '' : ''}
+    />
   )
 }
 

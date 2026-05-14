@@ -159,7 +159,7 @@ export default function HomePage() {
             <thead>
               <tr>
                 <th>编号</th><th>案件</th><th>被审讯人</th><th>审讯类型</th>
-                <th>时间</th><th>地点</th><th>状态</th><th>操作</th>
+                <th>时间</th><th>地点</th><th>状态</th><th className="data-table__col--actions">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -177,13 +177,8 @@ export default function HomePage() {
                       <span style={{ color: statusColor(r.status) }}>{statusLabel(r.status)}</span>
                     </span>
                   </td>
-                  <td>
-                    <button
-                      type="button"
-                      className="glass-btn small"
-                      disabled={!isTauri()}
-                      onClick={() => openView(r.id)}
-                    >
+                  <td className="data-table__col--actions">
+                    <button type="button" className="glass-btn small" disabled={!isTauri()} onClick={() => openView(r.id)}>
                       查看
                     </button>
                   </td>

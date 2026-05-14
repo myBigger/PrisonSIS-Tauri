@@ -10,7 +10,10 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "ppt:install-browsers": "export PLAYWRIGHT_BROWSERS_PATH=\"$PWD/.pw-browsers\" && npx playwright install chromium",
+    "ppt:screenshots": "export PLAYWRIGHT_BROWSERS_PATH=\"$PWD/.pw-browsers\" && npx playwright test e2e/ppt-screenshots.spec.ts",
+    "ppt:report": "export PLAYWRIGHT_BROWSERS_PATH=\"$PWD/.pw-browsers\" && npx playwright test e2e/ppt-screenshots.spec.ts && cd .. && python3 generate_prisonsis_ppt_report_with_images.py"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1",
@@ -21,6 +24,7 @@
     "react-dom": "^19.2.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.57.0",
     "@eslint/js": "^10.0.1",
     "@tauri-apps/cli": "^2.10.1",
     "@types/node": "^24.12.2",

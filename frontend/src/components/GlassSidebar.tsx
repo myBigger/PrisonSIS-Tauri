@@ -1,5 +1,7 @@
 // GlassSidebar.tsx — 毛玻璃侧边栏
 import { useState } from 'react'
+import Icon from './icons/Icon'
+import IconButton from './icons/IconButton'
 import './GlassSidebar.css'
 
 interface NavItem {
@@ -90,6 +92,7 @@ export default function GlassSidebar({ currentPage, onNavigate, user, onLogout }
                 <div
                   key={item.page}
                   className={`nav-item${currentPage === item.page ? ' active' : ''}`}
+                  data-page={item.page}
                   onClick={() => onNavigate(item.page)}
                   title={item.name}
                 >
@@ -111,13 +114,21 @@ export default function GlassSidebar({ currentPage, onNavigate, user, onLogout }
             <div className="role">{user.role === 'Admin' ? '系统管理员' : user.role}</div>
           </div>
         )}
-        <button
-          className="glass-btn icon-btn"
-          title="退出登录"
-          onClick={onLogout}
-        >
-          🚪
-        </button>
+        {collapsed ? (
+          <IconButton className="small" label="退出登录" onClick={() => onLogout?.()}>
+            <Icon name="logout" size={18} />
+          </IconButton>
+        ) : (
+          <button
+            type="button"
+            className="glass-btn small sidebar-logout-btn"
+            title="退出登录"
+            aria-label="退出登录"
+            onClick={() => onLogout?.()}
+          >
+            退出登录
+          </button>
+        )}
       </div>
     </div>
   )
